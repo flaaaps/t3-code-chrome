@@ -13,15 +13,67 @@ export interface PrLocation extends PrKey {
 
 const PR_PATH = /^\/([^/]+)\/([^/]+)\/pull\/(\d+)(?:\/([^/?#]+))?/;
 
-/** Parse a GitHub URL (or pathname) into a PR key. Returns undefined for non-PR pages. */
-export function parsePrUrl(input: string | URL): PrLocation | undefined {
+/** GitHub Enterprise Cloud with data residency lives on `<tenant>.ghe.com`. */
+const GHE_CLOUD = /^[a-z0-9-]+\.ghe\.com$/;
+
+/**
+ * Whether a hostname serves GitHub: github.com, any `*.ghe.com` tenant, or one of the GitHub
+ * Enterprise Server hosts the user added in the options.
+ */
+export function isGitHubHost(hostname: string, enterpriseHosts: readonly string[] = []): boolean {
+  const host = hostname.toLowerCase();
+  return (
+    host === "github.com" ||
+    host === "www.github.com" ||
+    GHE_CLOUD.test(host) ||
+    enterpriseHosts.some((entry) => entry.toLowerCase() === host)
+  );
+}
+
+/**
+ * Turn user input ("github.acme.corp", "https://github.acme.corp/org/repo") into a bare hostname.
+ * Returns undefined for anything that is not a plausible host.
+ */
+export function normaliseEnterpriseHost(input: string): string | undefined {
+  const text = input.trim();
+  if (!text) return undefined;
+  let hostname: string;
+  try {
+    hostname = new URL(text.includes("://") ? text : `https://${text}`).hostname.toLowerCase();
+  } catch {
+    return undefined;
+  }
+  if (!/^[a-z0-9.-]+$/.test(hostname) || !hostname.includes(".")) return undefined;
+  if (hostname === "www.github.com") return "github.com";
+  return hostname;
+}
+
+/** Match patterns for every page the content script runs on. */
+export function githubMatchPatterns(enterpriseHosts: readonly string[] = []): string[] {
+  return [
+    "https://github.com/*",
+    "https://*.ghe.com/*",
+    ...enterpriseHosts.filter((host) => !isGitHubHost(host)).map((host) => `https://${host}/*`),
+  ];
+}
+
+/**
+ * Parse a GitHub URL (or pathname) into a PR key. Returns undefined for non-PR pages.
+ * `hosts: "any"` skips the host check; the content script uses it because it only runs on pages
+ * the extension already decided are GitHub.
+ */
+export function parsePrUrl(
+  input: string | URL,
+  hosts: readonly string[] | "any" = [],
+): PrLocation | undefined {
   let url: URL;
   try {
     url = typeof input === "string" ? new URL(input, "https://github.com") : input;
   } catch {
     return undefined;
   }
-  if (url.hostname !== "github.com" && url.hostname !== "www.github.com") return undefined;
+  if (hosts !== "any" && !isGitHubHost(url.hostname, hosts)) return undefined;
+  const host = url.hostname.toLowerCase() === "www.github.com" ? "github.com" : url.hostname.toLowerCase();
   const match = PR_PATH.exec(url.pathname);
   if (!match) return undefined;
   const [, owner, repo, numberText, segment] = match;
@@ -34,7 +86,7 @@ export function parsePrUrl(input: string | URL): PrLocation | undefined {
       : segment === "commits" || segment === "checks" || segment === "files"
         ? segment
         : "other";
-  return { host: "github.com", owner, repo, number, tab };
+  return { host, owner, repo, number, tab };
 }
 
 export function prKeyEquals(a: PrKey | undefined, b: PrKey | undefined): boolean {

@@ -22,5 +22,5 @@
       "@background/*": ["src/background/*"]
     }
   },
-  "include": ["src", "test", "manifest.config.ts", "vite.config.ts"]
+  "include": ["src", "test", "manifest.config.ts", "vite.config.ts", "vite.content.config.ts"]
 }

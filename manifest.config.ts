@@ -1,6 +1,10 @@
 import { defineManifest } from "@crxjs/vite-plugin";
 import pkg from "./package.json";
 
+// github.com and GitHub Enterprise Cloud (`<tenant>.ghe.com`). Enterprise Server hosts are added at
+// runtime from the options page (optional host permission + registered content script).
+const GITHUB = ["https://github.com/*", "https://*.ghe.com/*"];
+
 export default defineManifest({
   manifest_version: 3,
   name: "T3 Code for GitHub",
@@ -28,13 +32,21 @@ export default defineManifest({
   },
   content_scripts: [
     {
-      matches: ["https://github.com/*"],
+      matches: GITHUB,
       js: ["src/content/index.ts"],
       run_at: "document_idle",
     },
   ],
-  permissions: ["storage", "alarms", "identity", "notifications", "contextMenus", "declarativeNetRequest"],
-  host_permissions: ["https://github.com/*", "http://127.0.0.1/*", "http://localhost/*"],
+  permissions: [
+    "storage",
+    "alarms",
+    "identity",
+    "notifications",
+    "contextMenus",
+    "declarativeNetRequest",
+    "scripting",
+  ],
+  host_permissions: [...GITHUB, "http://127.0.0.1/*", "http://localhost/*"],
   optional_host_permissions: ["http://*/*", "https://*/*"],
   commands: {
     "open-panel": {
@@ -45,7 +57,7 @@ export default defineManifest({
   web_accessible_resources: [
     {
       resources: ["public/icons/*.png"],
-      matches: ["https://github.com/*"],
+      matches: GITHUB,
     },
   ],
 });

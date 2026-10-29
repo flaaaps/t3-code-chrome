@@ -86,12 +86,17 @@ pnpm build          # writes dist/
 
    Paste the code, keep **Vollzugriff** (recommended for reviews that push and comment), click **Koppeln**.
    The connection shows up in T3 Code under Settings → Connections and can be revoked there.
-4. Open any pull request on github.com: the **Review starten** button sits in the PR header. `Alt+Shift+T`
+4. Open any pull request on GitHub: the **Review starten** button sits in the PR header. `Alt+Shift+T`
    opens the composer, `Cmd/Ctrl+Enter` sends, `Esc` closes.
 
 **Updating:** download the new zip, unzip it over the old folder (same path), and click the reload icon on
 the extension in `chrome://extensions`. Pairing and settings are kept because Chrome derives the extension
 ID from the folder path.
+
+**GitHub Enterprise:** GitHub Enterprise Cloud (`<tenant>.ghe.com`) works out of the box. For a GitHub
+Enterprise Server, add its hostname under Options → Einstellungen → GitHub Enterprise and allow access when
+the browser asks; the extension then injects itself on that host. Projects are matched by the remote's host,
+so a T3 project cloned from `github.acme.corp/org/repo` is preselected on that server's PRs.
 
 More T3 servers (for example another machine over Tailscale) can be added by URL. Linked environments of a
 server are offered automatically when T3 exposes them.

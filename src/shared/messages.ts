@@ -109,6 +109,7 @@ const settingsSchema = z.object({
   appendContextFooter: z.boolean(),
   openInAppAfterDispatch: z.boolean(),
   dispatchDelaySeconds: z.number().int().min(0).max(30),
+  enterpriseHosts: z.array(z.string()),
   lastPrUrl: z.string().optional(),
 });
 

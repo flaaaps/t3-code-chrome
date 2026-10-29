@@ -3,18 +3,19 @@ import { type PrLocation, parsePrUrl, prKeyEquals } from "@shared/prKey";
 export type PrListener = (location: PrLocation | undefined) => void;
 
 /**
- * Watch GitHub's client-side navigation (Turbo) and report the current PR, if any.
+ * Watch GitHub's client-side navigation (Turbo) and report the current PR, if any. The host is not
+ * checked: the content script is only injected into GitHub and GitHub Enterprise pages.
  * Fires immediately with the current state.
  */
 export function watchPrLocation(listener: PrListener): () => void {
-  let current = parsePrUrl(window.location.href);
+  let current = parsePrUrl(window.location.href, "any");
   let currentHref = window.location.href;
   listener(current);
 
   const check = () => {
     if (window.location.href === currentHref) return;
     currentHref = window.location.href;
-    const next = parsePrUrl(currentHref);
+    const next = parsePrUrl(currentHref, "any");
     const changed = !prKeyEquals(current, next) || current?.tab !== next?.tab;
     current = next;
     if (changed) listener(next);

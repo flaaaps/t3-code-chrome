@@ -6,6 +6,7 @@ import type {
   PromptTemplate,
   ServerConnection,
 } from "@shared/models";
+import { isGitHubHost, normaliseEnterpriseHost } from "@shared/prKey";
 import { listPlaceholders, PLACEHOLDERS, renderTemplate, SAMPLE_PR } from "@shared/templates/render";
 import { useEffect, useMemo, useState } from "preact/hooks";
 
@@ -736,8 +737,107 @@ function Settings() {
           <span>Wenn eine Session fertig ist oder fehlschlägt</span>
         </label>
       </div>
+      <EnterpriseCard hosts={settings.enterpriseHosts} update={update} />
       <ShortcutCard />
       {saved ? <div class="alert success">Gespeichert.</div> : null}
+    </div>
+  );
+}
+
+function EnterpriseCard({
+  hosts,
+  update,
+}: {
+  hosts: string[];
+  update: (patch: Partial<ExtensionSettings>) => Promise<void>;
+}) {
+  const [input, setInput] = useState("");
+  const [error, setError] = useState<string | undefined>(undefined);
+  const [missing, setMissing] = useState<string[]>([]);
+
+  useEffect(() => {
+    void Promise.all(
+      hosts.map((host) => chrome.permissions.contains({ origins: [`https://${host}/*`] })),
+    ).then((granted) => setMissing(hosts.filter((_, index) => !granted[index])));
+  }, [hosts]);
+
+  // chrome.permissions.request must run inside the click, before any other await.
+  const grant = async (host: string) => {
+    const granted = await chrome.permissions.request({ origins: [`https://${host}/*`] });
+    if (!granted) throw new Error(`Ohne Zugriff auf ${host} kann die Extension dort nicht erscheinen.`);
+  };
+
+  const add = async () => {
+    setError(undefined);
+    const host = normaliseEnterpriseHost(input);
+    if (!host) {
+      setError("Das ist kein gültiger Hostname.");
+      return;
+    }
+    if (isGitHubHost(host)) {
+      setError(`${host} wird bereits automatisch unterstützt.`);
+      return;
+    }
+    try {
+      await grant(host);
+      await update({ enterpriseHosts: [...hosts.filter((entry) => entry !== host), host] });
+      setInput("");
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+
+  const remove = async (host: string) => {
+    await update({ enterpriseHosts: hosts.filter((entry) => entry !== host) });
+    await chrome.permissions.remove({ origins: [`https://${host}/*`] }).catch(() => undefined);
+  };
+
+  return (
+    <div class="card">
+      <h2>GitHub Enterprise</h2>
+      <p class="muted">
+        github.com und GitHub Enterprise Cloud (<code>*.ghe.com</code>) funktionieren automatisch. Für einen
+        eigenen GitHub Enterprise Server trage hier seinen Hostnamen ein; danach offene Seiten neu laden.
+      </p>
+      {hosts.map((host) => (
+        <div class="row" key={host}>
+          <span class="grow">
+            <code>{host}</code>
+            {missing.includes(host) ? <span class="muted"> · kein Zugriff</span> : null}
+          </span>
+          {missing.includes(host) ? (
+            <button
+              type="button"
+              class="btn small"
+              onClick={() =>
+                void grant(host)
+                  .then(() => setMissing(missing.filter((entry) => entry !== host)))
+                  .catch((e: Error) => setError(e.message))
+              }
+            >
+              Zugriff erlauben
+            </button>
+          ) : null}
+          <button type="button" class="btn small" onClick={() => void remove(host)}>
+            Entfernen
+          </button>
+        </div>
+      ))}
+      <div class="row">
+        <input
+          class="input grow"
+          value={input}
+          onInput={(e) => setInput((e.target as HTMLInputElement).value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") void add();
+          }}
+          placeholder="github.firma.de"
+        />
+        <button type="button" class="btn" disabled={!input.trim()} onClick={() => void add()}>
+          Hinzufügen
+        </button>
+      </div>
+      {error ? <div class="alert error">{error}</div> : null}
     </div>
   );
 }

@@ -16,6 +16,7 @@ import type {
   PromptTemplate,
   Session,
 } from "@shared/models";
+import { isGitHubHost, normaliseEnterpriseHost } from "@shared/prKey";
 import { matchProject, rankThreads, sortProjects } from "@shared/sort";
 import { BUILTIN_TEMPLATES } from "@shared/templates/builtin";
 import { defaultThreadTitle } from "@shared/templates/render";
@@ -347,6 +348,13 @@ export function createHandlers({ connections, catalog, sessions }: RouterDeps): 
     "settings.get": async () => ({ settings: await loadSettings() }),
     "settings.set": async ({ settings }) => {
       const merged: ExtensionSettings = { ...(await loadSettings()), ...stripUndefined(settings) };
+      merged.enterpriseHosts = [
+        ...new Set(
+          merged.enterpriseHosts
+            .map(normaliseEnterpriseHost)
+            .filter((host): host is string => host !== undefined && !isGitHubHost(host)),
+        ),
+      ];
       await saveSettings(merged);
       return { settings: merged };
     },

@@ -66,9 +66,12 @@ export function Popup() {
   useEffect(() => {
     void refresh();
     const port = openLivePort("popup");
-    chrome.tabs
-      .query({ active: true, currentWindow: true })
-      .then(([tab]) => setCurrentPr(tab?.url && parsePrUrl(tab.url) ? tab.url : undefined));
+    void Promise.all([
+      chrome.tabs.query({ active: true, currentWindow: true }),
+      sendRequest({ type: "settings.get" }),
+    ]).then(([[tab], { settings }]) =>
+      setCurrentPr(tab?.url && parsePrUrl(tab.url, settings.enterpriseHosts) ? tab.url : undefined),
+    );
     const listener = (event: ExtensionEvent) => {
       if (event.type === "sessions.updated") setSessions(event.sessions);
       if (event.type === "connections.updated") void refresh();
@@ -169,7 +172,7 @@ export function Popup() {
                   Zur letzten PR
                 </a>
               ) : (
-                "Öffne einen Pull Request auf github.com."
+                "Öffne einen Pull Request auf GitHub."
               )}
             </div>
           ) : null}

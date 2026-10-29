@@ -296,6 +296,8 @@ export interface ExtensionSettings {
   openInAppAfterDispatch: boolean;
   /** Seconds the cancel toast stays before a one-click action is dispatched. */
   dispatchDelaySeconds: number;
+  /** GitHub Enterprise Server hosts (e.g. `github.acme.corp`); github.com and `*.ghe.com` are built in. */
+  enterpriseHosts: string[];
   lastPrUrl?: string;
 }
 
@@ -308,6 +310,7 @@ export const DEFAULT_SETTINGS: ExtensionSettings = {
   appendContextFooter: true,
   openInAppAfterDispatch: false,
   dispatchDelaySeconds: 5,
+  enterpriseHosts: [],
 };
 
 export const DEFAULT_LOCAL_ORIGIN = "http://127.0.0.1:3773";
