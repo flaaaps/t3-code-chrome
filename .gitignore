@@ -1,0 +1,8 @@
+node_modules/
+dist/
+*.zip
+.vite/
+*.log
+.DS_Store
+.env
+test/e2e/out/
