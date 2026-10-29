@@ -13,7 +13,8 @@
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "typecheck": "tsc --noEmit",
-    "package": "pnpm build && cd dist && zip -r ../t3-code-chrome.zip . && cd .."
+    "package": "pnpm build && cd dist && zip -r ../t3-code-chrome.zip . && cd ..",
+    "screenshots": "pnpm build && node test/e2e/showcase.mjs"
   },
   "dependencies": {
     "@preact/signals": "^2.3.0",

@@ -38,7 +38,7 @@ function relativeTime(iso: string): string {
 
 /** The popup is the inbox: what waits for you first, then what runs, then what finished today. */
 export function Popup() {
-  const [link, setLink] = useState<LinkState>("none");
+  const [link, setLink] = useState<LinkState | undefined>(undefined);
   const [label, setLabel] = useState<string | undefined>(undefined);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [currentPr, setCurrentPr] = useState<string | undefined>(undefined);
@@ -111,7 +111,7 @@ export function Popup() {
 
       {error ? <div class="alert error">{error}</div> : null}
 
-      {link !== "ready" ? (
+      {link === undefined ? null : link !== "ready" ? (
         <Wizard link={link} onDone={refresh} />
       ) : (
         <>

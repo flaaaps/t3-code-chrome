@@ -499,7 +499,7 @@ export function quickDispatch(intentId: string): void {
   showToast({
     id: crypto.randomUUID(),
     kind: "countdown",
-    text: `${template.actionLabel ?? template.name} startet in ${seconds} s`,
+    text: `Startet in ${seconds} s`,
     detail,
     secondsLeft: seconds,
     onCancel: () => dismissToast(),
@@ -523,7 +523,7 @@ export function quickDispatch(intentId: string): void {
     toast.value = {
       ...current,
       secondsLeft: left,
-      text: `${template.actionLabel ?? template.name} startet in ${left} s`,
+      text: `Startet in ${left} s`,
     };
   }, 1000);
 }
