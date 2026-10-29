@@ -1,5 +1,6 @@
 import type { ExtensionEvent } from "@shared/client";
 import type { PrLocation } from "@shared/prKey";
+import { matchesShortcut, parseShortcut } from "@shared/shortcut";
 import { h, render } from "preact";
 import {
   findAgentBoxAnchor,
@@ -196,6 +197,33 @@ function deactivate(): void {
   unmountOverlay();
 }
 
+// --- keyboard shortcut ----------------------------------------------------------------
+// The browser normally delivers the extension command (background → "panel.toggle"). Some Chromium
+// browsers do not, so the page also listens for the same key combination. If both fire for one
+// key press, the second toggle within a short window is ignored.
+
+let lastToggle = 0;
+
+function togglePanel(): void {
+  const now = Date.now();
+  if (now - lastToggle < 400) return;
+  lastToggle = now;
+  if (store.composerOpen.value) store.closeComposer();
+  else store.openComposer();
+}
+
+document.addEventListener(
+  "keydown",
+  (event) => {
+    if (!currentPr || event.repeat) return;
+    if (!matchesShortcut(event, parseShortcut(store.shortcut.value))) return;
+    event.preventDefault();
+    event.stopPropagation();
+    togglePanel();
+  },
+  true,
+);
+
 watchPrLocation((location) => {
   if (!location) {
     deactivate();
@@ -219,8 +247,7 @@ chrome.runtime.onMessage.addListener((message: ExtensionEvent) => {
   if (!currentPr) return;
   switch (message.type) {
     case "panel.toggle":
-      if (store.composerOpen.value) store.closeComposer();
-      else store.openComposer();
+      togglePanel();
       break;
     case "panel.openWithSelection":
       store.openComposer({

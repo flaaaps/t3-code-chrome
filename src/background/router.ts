@@ -355,6 +355,15 @@ export function createHandlers({ connections, catalog, sessions }: RouterDeps): 
       const { target } = await catalog.resolve(envKey);
       return { ok: true, opened: await openThread(connections, target, threadId) };
     },
+    "shortcut.get": async () => {
+      const commands = await chrome.commands.getAll();
+      return { shortcut: commands.find((command) => command.name === "open-panel")?.shortcut ?? "" };
+    },
+    "shortcut.edit": async () => {
+      // Every Chromium browser (Chrome, Dia, Arc, Edge, Brave) serves this page under chrome://.
+      await chrome.tabs.create({ url: "chrome://extensions/shortcuts" });
+      return { ok: true };
+    },
     "options.open": async ({ tab }) => {
       if (tab) {
         await chrome.tabs.create({ url: `${chrome.runtime.getURL("src/options/index.html")}#${tab}` });

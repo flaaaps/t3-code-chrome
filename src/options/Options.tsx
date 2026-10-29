@@ -736,15 +736,45 @@ function Settings() {
           <span>Wenn eine Session fertig ist oder fehlschlägt</span>
         </label>
       </div>
-      <div class="card">
-        <h2>Tastenkürzel</h2>
-        <p>
-          <kbd>⌥</kbd> + <kbd>⇧</kbd> + <kbd>T</kbd> öffnet den Composer auf einer PR-Seite, <kbd>⌘</kbd> +{" "}
-          <kbd>↩</kbd> sendet, <kbd>Esc</kbd> schließt. Änderbar unter{" "}
-          <code>chrome://extensions/shortcuts</code>.
-        </p>
-      </div>
+      <ShortcutCard />
       {saved ? <div class="alert success">Gespeichert.</div> : null}
+    </div>
+  );
+}
+
+function ShortcutCard() {
+  const [shortcut, setShortcut] = useState<string | undefined>(undefined);
+  const refresh = () =>
+    void sendRequest({ type: "shortcut.get" })
+      .then((result) => setShortcut(result.shortcut))
+      .catch(() => setShortcut(""));
+  useEffect(() => {
+    refresh();
+    // The user may change the binding in the browser's shortcut page and come back.
+    window.addEventListener("focus", refresh);
+    return () => window.removeEventListener("focus", refresh);
+  }, []);
+  return (
+    <div class="card">
+      <h2>Tastenkürzel</h2>
+      <div class="row">
+        <span class="grow">
+          Composer auf einer PR-Seite öffnen:{" "}
+          {shortcut === undefined ? "…" : shortcut ? <kbd>{shortcut}</kbd> : <strong>nicht belegt</strong>}
+        </span>
+        <button type="button" class="btn small" onClick={() => void sendRequest({ type: "shortcut.edit" })}>
+          {shortcut ? "Ändern" : "Festlegen"}
+        </button>
+      </div>
+      {shortcut === "" ? (
+        <div class="alert">
+          Der Browser hat kein Kürzel vergeben, meist weil die Kombination schon belegt ist. Lege unter
+          „Festlegen“ eine freie Kombination fest.
+        </div>
+      ) : null}
+      <p class="muted">
+        Im Composer: <kbd>⌘</kbd> + <kbd>↩</kbd> sendet, <kbd>Esc</kbd> schließt.
+      </p>
     </div>
   );
 }

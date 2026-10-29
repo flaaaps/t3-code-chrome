@@ -53,6 +53,8 @@ export const sessions = signal<Session[]>([]);
 export const templates = signal<PromptTemplate[]>(BUILTIN_TEMPLATES);
 export const settings = signal<ExtensionSettings>(DEFAULT_SETTINGS);
 export const toast = signal<Toast | undefined>(undefined);
+/** Key bound to the open-panel command, as the browser reports it (e.g. "⌥⇧T"); "" when unassigned. */
+export const shortcut = signal<string>("");
 export const agentBoxCollapsed = signal(false);
 
 export const composerOpen = signal(false);
@@ -143,6 +145,11 @@ export async function load(force: boolean): Promise<void> {
     ]);
     templates.value = list;
     settings.value = current;
+    void sendRequest({ type: "shortcut.get" })
+      .then((result) => {
+        shortcut.value = result.shortcut;
+      })
+      .catch(() => undefined);
     composerReviewOutput.value = current.defaultReviewOutput;
     const data = await sendRequest({ type: "pr.overview", pr: key, force });
     if (!prKeyEquals(pr.value, context)) return;

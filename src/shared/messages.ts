@@ -176,6 +176,8 @@ export const requestSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("settings.set"), settings: settingsSchema.partial() }),
   z.object({ type: z.literal("thread.open"), envKey: z.string(), threadId: z.string() }),
   z.object({ type: z.literal("options.open"), tab: z.string().optional() }),
+  z.object({ type: z.literal("shortcut.get") }),
+  z.object({ type: z.literal("shortcut.edit") }),
 ]);
 
 export type ExtensionRequest = z.infer<typeof requestSchema>;
@@ -215,6 +217,9 @@ export interface ResponseMap {
   "settings.set": { settings: ExtensionSettings };
   "thread.open": { ok: true; opened: "app" | "web" };
   "options.open": { ok: true };
+  /** The key currently bound to the open-panel command; empty when unassigned. */
+  "shortcut.get": { shortcut: string };
+  "shortcut.edit": { ok: true };
 }
 
 export type ResponseOf<T extends RequestType> = ResponseMap[T];
@@ -225,7 +230,7 @@ export type Envelope<T> = { ok: true; data: T } | { ok: false; error: Serialized
 export type ExtensionEvent =
   | { type: "sessions.updated"; sessions: Session[] }
   | { type: "connections.updated"; link: LinkState }
-  | { type: "panel.toggle" }
+  | { type: "panel.toggle"; source?: "command" | "popup" }
   | { type: "panel.openWithSelection"; selection: string };
 
 export type { PendingQuestion };

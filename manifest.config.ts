@@ -39,7 +39,7 @@ export default defineManifest({
   commands: {
     "open-panel": {
       suggested_key: { default: "Alt+Shift+T" },
-      description: "Open the T3 Code panel on the current pull request",
+      description: "Composer auf dem aktuellen Pull Request öffnen",
     },
   },
   web_accessible_resources: [

@@ -77,9 +77,20 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
 });
 
 chrome.commands.onCommand.addListener((command, tab) => {
-  if (command !== "open-panel" || tab?.id === undefined || !tab.url || !parsePrUrl(tab.url)) return;
-  const event: ExtensionEvent = { type: "panel.toggle" };
-  chrome.tabs.sendMessage(tab.id, event).catch(() => undefined);
+  if (command !== "open-panel") return;
+  void (async () => {
+    // Some Chromium browsers (seen in Dia) deliver the command without a usable tab; fall back to
+    // the active tab of the focused window.
+    let target = tab?.id !== undefined && tab.url ? tab : undefined;
+    if (!target) {
+      const [active] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+      target = active;
+    }
+    console.info("[t3] command", command, { tabFromEvent: tab?.id, target: target?.id, url: target?.url });
+    if (target?.id === undefined || !target.url || !parsePrUrl(target.url)) return;
+    const event: ExtensionEvent = { type: "panel.toggle", source: "command" };
+    await chrome.tabs.sendMessage(target.id, event).catch(() => undefined);
+  })();
 });
 
 chrome.notifications?.onClicked.addListener((notificationId) => {

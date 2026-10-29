@@ -126,9 +126,11 @@ export function HeaderAction({ onJumpToSessions }: { onJumpToSessions: () => voi
             }}
           >
             <span class="label">Anpassen…</span>
-            <span class="hint">
-              <kbd class="t3-kbd">⌥⇧T</kbd>
-            </span>
+            {store.shortcut.value ? (
+              <span class="hint">
+                <kbd class="t3-kbd">{store.shortcut.value}</kbd>
+              </span>
+            ) : null}
           </button>
           <div class="t3-menu-target" title={store.targetLabel(store.composerTarget.value, context)}>
             Ziel: {store.targetLabel(store.composerTarget.value, context)}
