@@ -13,7 +13,7 @@
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "typecheck": "tsc --noEmit",
-    "package": "pnpm build && cd dist && zip -r ../t3-code-chrome.zip . && cd ..",
+    "package": "pnpm build && cd dist && zip -qr ../t3-code-chrome.zip . -x '*.map'",
     "screenshots": "pnpm build && node test/e2e/showcase.mjs"
   },
   "dependencies": {

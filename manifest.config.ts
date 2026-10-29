@@ -5,7 +5,8 @@ export default defineManifest({
   manifest_version: 3,
   name: "T3 Code for GitHub",
   description: pkg.description,
-  version: pkg.version,
+  // CI sets EXTENSION_VERSION per release (major.minor from package.json, patch = run number).
+  version: process.env.EXTENSION_VERSION ?? pkg.version,
   icons: {
     16: "public/icons/icon-16.png",
     32: "public/icons/icon-32.png",

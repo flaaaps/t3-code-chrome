@@ -62,14 +62,21 @@ The screenshots use demo data from a fake T3 server; see `test/e2e/showcase.mjs`
 The extension talks to T3 Code through its local MCP endpoint (`http://127.0.0.1:3773/mcp`), the same API the
 `t3` CLI uses. It needs no GitHub token: the agent in T3 fetches diff, comments and checks itself.
 
-## Install (unpacked)
+## Install
+
+**Download the latest build:**
+[t3-code-chrome.zip](https://github.com/flaaaps/t3-code-chrome/releases/latest/download/t3-code-chrome.zip)
+(all versions on the [releases page](https://github.com/flaaaps/t3-code-chrome/releases)). Unzip it into a
+folder you keep, then continue with step 1.
+
+To build it yourself instead (then load `dist/` in step 1):
 
 ```sh
 pnpm install
 pnpm build          # writes dist/
 ```
 
-1. Open `chrome://extensions`, enable **Developer mode**, click **Load unpacked** and select `dist/`.
+1. Open `chrome://extensions`, enable **Developer mode**, click **Load unpacked** and select the folder.
 2. Click the toolbar icon. The popup finds the local T3 Code server on `127.0.0.1:3773` by itself.
 3. Create a pairing code in T3 Code (Settings → Connections → Pair a client) or in a terminal:
 
@@ -81,6 +88,10 @@ pnpm build          # writes dist/
    The connection shows up in T3 Code under Settings → Connections and can be revoked there.
 4. Open any pull request on github.com: the **Review starten** button sits in the PR header. `Alt+Shift+T`
    opens the composer, `Cmd/Ctrl+Enter` sends, `Esc` closes.
+
+**Updating:** download the new zip, unzip it over the old folder (same path), and click the reload icon on
+the extension in `chrome://extensions`. Pairing and settings are kept because Chrome derives the extension
+ID from the folder path.
 
 More T3 servers (for example another machine over Tailscale) can be added by URL. Linked environments of a
 server are offered automatically when T3 exposes them.
@@ -101,6 +112,14 @@ CLI, pairs the extension through the popup wizard, opens a public PR, checks the
 target list and the guard against empty prompts, and with `--dispatch` starts a tiny scratch thread in T3 and
 waits for the Agent-Box to show it as finished. Screenshots land in
 `test/e2e/out/`.
+
+## Releases
+
+Every push to `main` that touches the extension (not only docs or the E2E scripts) runs
+[`.github/workflows/release.yml`](.github/workflows/release.yml): lint, typecheck, unit tests, build, and a
+GitHub release with `t3-code-chrome.zip`. The version is `major.minor` from `package.json` plus the workflow
+run number as patch (for example `0.1.7`), and it is written into the extension manifest. Bump `major.minor`
+in `package.json` for bigger releases.
 
 ## Layout
 

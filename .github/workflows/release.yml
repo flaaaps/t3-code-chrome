@@ -1,0 +1,75 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "test/e2e/**"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Lint, typecheck, test
+        run: |
+          pnpm lint
+          pnpm typecheck
+          pnpm test
+
+      - name: Compute version
+        id: version
+        run: |
+          base=$(node -p "require('./package.json').version.split('.').slice(0, 2).join('.')")
+          version="${base}.${GITHUB_RUN_NUMBER}"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Build
+        env:
+          EXTENSION_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          pnpm build
+          test "$(node -p "require('./dist/manifest.json').version")" = "${EXTENSION_VERSION}"
+          (cd dist && zip -qr ../t3-code-chrome.zip . -x '*.map')
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          cat > notes.md <<NOTES
+          **Installieren oder aktualisieren**
+
+          1. \`t3-code-chrome.zip\` herunterladen und entpacken.
+          2. \`chrome://extensions\` öffnen, Entwicklermodus an, „Entpackte Erweiterung laden“ und den entpackten Ordner wählen.
+          3. Bei einem Update den alten Ordner durch den neuen ersetzen und in \`chrome://extensions\` auf „Neu laden“ klicken. Kopplung und Einstellungen bleiben erhalten.
+
+          NOTES
+          gh release create "$TAG" t3-code-chrome.zip \
+            --target "$GITHUB_SHA" \
+            --title "T3 Code for GitHub ${VERSION}" \
+            --notes-file notes.md \
+            --generate-notes \
+            --latest
