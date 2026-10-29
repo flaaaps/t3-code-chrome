@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { PrContext } from "../../src/shared/models";
 import { BUILTIN_TEMPLATES } from "../../src/shared/templates/builtin";
-import { defaultThreadTitle, listPlaceholders, renderTemplate } from "../../src/shared/templates/render";
+import {
+  defaultThreadTitle,
+  listPlaceholders,
+  missingRequirements,
+  renderTemplate,
+} from "../../src/shared/templates/render";
 
 const pr: PrContext = {
   host: "github.com",
@@ -39,11 +44,11 @@ describe("renderTemplate", () => {
     const template = BUILTIN_TEMPLATES.find((t) => t.id === "builtin:reply-comment");
     expect(template).toBeDefined();
     const out = renderTemplate(template?.body ?? "", {
-      pr,
-      selection: "Please rename this.",
+      pr: { ...pr, comment: { text: "Please rename this.", file: "src/a.ts", line: "12", author: "jane" } },
       appendContextFooter: false,
     });
     expect(out).toContain("> Please rename this.");
+    expect(out).toContain("in `src/a.ts:12` (von jane)");
   });
 
   it("lists placeholders", () => {
@@ -52,9 +57,43 @@ describe("renderTemplate", () => {
 
   it("all builtin templates render without leftover braces", () => {
     for (const template of BUILTIN_TEMPLATES) {
-      const out = renderTemplate(template.body, { pr, note: "n", selection: "s" });
+      const out = renderTemplate(template.body, { pr: { ...pr, comment: { text: "s" } }, note: "n" });
       expect(out).not.toMatch(/\{\{/);
     }
+  });
+});
+
+describe("missingRequirements", () => {
+  it("blocks the free prompt without text and the comment action without a comment", () => {
+    const byId = (id: string) => {
+      const found = BUILTIN_TEMPLATES.find((t) => t.id === id);
+      if (!found) throw new Error(id);
+      return found;
+    };
+    expect(missingRequirements(byId("builtin:free"), { note: "", comment: undefined })).toEqual(["note"]);
+    expect(missingRequirements(byId("builtin:free"), { note: "do it", comment: undefined })).toEqual([]);
+    expect(missingRequirements(byId("builtin:reply-comment"), { note: "", comment: undefined })).toEqual([
+      "comment",
+    ]);
+    expect(missingRequirements(byId("builtin:reply-comment"), { note: "", comment: { text: "x" } })).toEqual(
+      [],
+    );
+  });
+
+  it("switches the review output text", () => {
+    const review = BUILTIN_TEMPLATES.find((t) => t.id === "builtin:review");
+    const inline = renderTemplate(review?.body ?? "", {
+      pr,
+      reviewOutput: "inline",
+      appendContextFooter: false,
+    });
+    const report = renderTemplate(review?.body ?? "", {
+      pr,
+      reviewOutput: "report",
+      appendContextFooter: false,
+    });
+    expect(inline).toContain("Inline-Review-Kommentare");
+    expect(report).toContain("Poste nichts auf GitHub");
   });
 });
 

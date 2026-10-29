@@ -66,19 +66,19 @@ describe("rankThreads", () => {
       thread({
         threadId: "title-mention",
         projectId: "p9",
-        title: "Fix review on #1103",
+        title: "Fix review on studypilot/monorepo#1103",
         updatedAt: "2025-11-01T00:00:00Z",
       }),
       thread({ threadId: "same-project-newer", projectId: "p2", updatedAt: "2026-02-01T00:00:00Z" }),
     ];
-    const ranked = rankThreads(threads, pr, "p2").map((r) => `${r.rank}:${r.thread.threadId}`);
+    const ranked = rankThreads(threads, pr, "p2").map((r) => `${r.group}:${r.thread.threadId}`);
     expect(ranked).toEqual([
-      "0:linked",
-      "0:title-mention",
-      "1:same-project-running",
-      "2:same-project-newer",
-      "2:same-project-old",
-      "3:other-project",
+      "this-pr:linked",
+      "this-pr:title-mention",
+      "project-active:same-project-running",
+      "project:same-project-newer",
+      "project:same-project-old",
+      "other:other-project",
     ]);
   });
 
@@ -97,6 +97,6 @@ describe("rankThreads", () => {
         ],
       }),
     ];
-    expect(rankThreads(threads, pr, "p2")[0]?.rank).toBe(2);
+    expect(rankThreads(threads, pr, "p2")[0]?.group).toBe("project");
   });
 });

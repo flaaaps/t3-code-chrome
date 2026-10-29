@@ -6,56 +6,90 @@ import {
   type RequestType,
   type ResponseOf,
   requestSchema,
-  type ThreadMessagePreview,
 } from "@shared/messages";
 import type {
+  Defaults,
   EnvironmentCapabilities,
   ExtensionSettings,
   Job,
+  PrOverview,
   PromptTemplate,
-  PrSuggestions,
-  ThreadSummary,
+  Session,
 } from "@shared/models";
-import { prKeyEquals } from "@shared/prKey";
 import { matchProject, rankThreads, sortProjects } from "@shared/sort";
 import { BUILTIN_TEMPLATES } from "@shared/templates/builtin";
 import { defaultThreadTitle } from "@shared/templates/render";
 import type { Catalog } from "./catalog";
 import type { ConnectionManager } from "./connections";
-import type { JobTracker } from "./jobs";
 import { openThread } from "./openThread";
+import type { SessionTracker } from "./sessions";
 import { loadCustomTemplates, loadSettings, saveCustomTemplates, saveSettings } from "./storage";
 
 export interface RouterDeps {
   connections: ConnectionManager;
   catalog: Catalog;
-  jobs: JobTracker;
+  sessions: SessionTracker;
 }
 
 type Handlers = {
   [T in RequestType]: (request: RequestOf<T>, sender: chrome.runtime.MessageSender) => Promise<ResponseOf<T>>;
 };
 
-export function createHandlers({ connections, catalog, jobs }: RouterDeps): Handlers {
+export function createHandlers({ connections, catalog, sessions }: RouterDeps): Handlers {
   async function allTemplates(): Promise<PromptTemplate[]> {
     const custom = await loadCustomTemplates();
-    const overridden = new Set(custom.map((t) => t.id));
-    return [...custom, ...BUILTIN_TEMPLATES.filter((t) => !overridden.has(t.id))];
+    const overridden = new Map(custom.map((t) => [t.id, t]));
+    const builtins = BUILTIN_TEMPLATES.map((t) => overridden.get(t.id) ?? t);
+    const extras = custom.filter((t) => !BUILTIN_TEMPLATES.some((b) => b.id === t.id));
+    return [...builtins, ...extras];
   }
 
-  async function defaultEnvKey(): Promise<string | undefined> {
-    const environments = await catalog.listEnvironments();
-    return (
-      environments.find((env) => env.reachable && !env.linked)?.key ??
-      environments.find((env) => env.reachable)?.key
+  /** Make sure every connection has a known health, then require at least one usable server. */
+  async function requireLink(force: boolean): Promise<void> {
+    const all = await connections.list();
+    if (all.length === 0) {
+      const detected = await connections.autoDetectLocal();
+      if (!detected) {
+        throw new ExtensionError("no_connection", "T3 Code ist noch nicht eingerichtet.");
+      }
+    }
+    const list = await connections.list();
+    await Promise.all(
+      list.map((connection) =>
+        force || connections.healthOf(connection.id) === "unknown"
+          ? connections.probe(connection.id)
+          : Promise.resolve(),
+      ),
     );
+    const link = await connections.linkState();
+    if (link === "ready") return;
+    if (link === "unpaired")
+      throw new ExtensionError("unpaired", "T3 Code läuft, ist aber noch nicht gekoppelt.");
+    throw new ExtensionError("unreachable", "T3 Code antwortet nicht. Läuft die Desktop-App?");
+  }
+
+  async function sessionFor(envKey: string, threadId: string): Promise<Session> {
+    await sessions.refreshThread(envKey, threadId);
+    const job = await sessions.jobForThread(envKey, threadId);
+    if (job) return sessions.sessionFromJob(job);
+    const all = await sessions.inbox();
+    const found = all.find((s) => s.threadId === threadId);
+    if (found) return found;
+    throw new ExtensionError("not_found", "Session nicht gefunden.");
   }
 
   return {
     "connections.list": async () => ({
       connections: await connections.list(),
       health: await connections.healthMap(),
+      link: await connections.linkState(),
     }),
+    "connections.autoDetect": async () => {
+      const connection = await connections.autoDetectLocal();
+      if (!connection) return { health: "unreachable" as const };
+      const probed = await connections.probe(connection.id);
+      return { connection: probed.connection, health: probed.health };
+    },
     "connections.add": async ({ origin, label }) => ({ connection: await connections.add(origin, label) }),
     "connections.remove": async ({ id }) => {
       await connections.remove(id);
@@ -75,41 +109,24 @@ export function createHandlers({ connections, catalog, jobs }: RouterDeps): Hand
       return { ok: true };
     },
 
-    "pr.suggestions": async ({ pr, force }) => {
-      const all = await connections.list();
-      if (all.length === 0) {
-        throw new ExtensionError(
-          "unauthenticated",
-          "Noch keine T3-Code-Verbindung eingerichtet. Öffne die Optionen der Extension.",
-        );
-      }
-      // Make sure health is known before listing environments.
-      await Promise.all(
-        all.map((connection) =>
-          force || connections.healthOf(connection.id) === "unknown"
-            ? connections.probe(connection.id)
-            : Promise.resolve(),
-        ),
-      );
-      const environments = await catalog.listEnvironments(force);
+    "pr.overview": async ({ pr, force }) => {
+      await requireLink(force === true);
+      const settings = await loadSettings();
+      const environments = await catalog.listEnvironments(force === true);
       const reachable = environments.filter((env) => env.reachable);
-      if (reachable.length === 0) {
-        throw new ExtensionError(
-          "unreachable",
-          "Keine erreichbare T3-Code-Verbindung. Läuft die Desktop-App?",
-        );
-      }
-      const projectsByEnv = await Promise.all(
-        reachable.map((env) => catalog.listProjects(env.key, force).catch(() => [])),
-      );
-      const projects = projectsByEnv.flat();
+      const projects = (
+        await Promise.all(
+          reachable.map((env) => catalog.listProjects(env.key, force === true).catch(() => [])),
+        )
+      ).flat();
       const suggestedProject = matchProject(projects, pr);
-      const suggestedEnvKey = suggestedProject?.envKey ?? (await defaultEnvKey());
-
-      const threadsByEnv = await Promise.all(
-        reachable.map((env) => catalog.listThreads(env.key, force).catch(() => [])),
-      );
-      const threads = threadsByEnv.flat();
+      const envKey =
+        suggestedProject?.envKey ?? reachable.find((env) => !env.linked)?.key ?? reachable[0]?.key;
+      const threads = (
+        await Promise.all(
+          reachable.map((env) => catalog.listThreads(env.key, force === true).catch(() => [])),
+        )
+      ).flat();
       const ranked = rankThreads(threads, pr, suggestedProject?.id);
       const capabilities: Record<string, EnvironmentCapabilities> = {};
       await Promise.all(
@@ -121,21 +138,40 @@ export function createHandlers({ connections, catalog, jobs }: RouterDeps): Hand
           }
         }),
       );
-      const result: PrSuggestions = {
+      const modelLabel = (() => {
+        const selection = suggestedProject?.defaultModelSelection ?? settings.defaultModelSelection;
+        if (!selection) return undefined;
+        const provider = envKey
+          ? capabilities[envKey]?.providers.find((p) => p.providerInstanceId === selection.instanceId)
+          : undefined;
+        return provider?.models.find((m) => m.id === selection.model)?.label ?? selection.model;
+      })();
+      const defaults: Defaults = {
+        ...(envKey ? { envKey } : {}),
+        ...(suggestedProject ? { projectId: suggestedProject.id, projectTitle: suggestedProject.title } : {}),
+        workspace: settings.defaultWorkspace,
+        runtimeMode: settings.defaultRuntimeMode,
+        ...(modelLabel ? { modelLabel } : {}),
+      };
+      const overview: PrOverview = {
         pr,
+        link: "ready",
         environments,
-        ...(suggestedEnvKey ? { defaultEnvKey: suggestedEnvKey } : {}),
         projects: sortProjects(projects, suggestedProject?.id),
         ...(suggestedProject ? { suggestedProjectId: suggestedProject.id } : {}),
         threads: ranked.map((entry) => entry.thread),
-        ...(ranked[0]?.reason === "linked-pr" ? { suggestedThreadId: ranked[0].thread.threadId } : {}),
         capabilities,
-        jobs: await jobs.list(pr),
+        sessions: await sessions.sessionsForPr(pr, { refreshLinked: force === true }),
+        defaults,
       };
-      return result;
+      return overview;
     },
 
-    "pr.dispatch": async ({ pr, target, prompt, title, clientRequestId }) => {
+    "pr.sessions": async ({ pr, refresh }) => ({
+      sessions: await sessions.sessionsForPr(pr, { refreshLinked: refresh === true }),
+    }),
+
+    "pr.dispatch": async ({ pr, target, prompt, title, intentId, intentName, clientRequestId }) => {
       const requestId = clientRequestId ?? crypto.randomUUID();
       const { target: env, transport } = await catalog.resolve(target.envKey);
       const envArgs = env.toolEnvironmentId ? { environmentId: env.toolEnvironmentId } : {};
@@ -146,7 +182,10 @@ export function createHandlers({ connections, catalog, jobs }: RouterDeps): Hand
       let status: Job["status"] = "queued";
 
       if (target.kind === "new") {
-        threadTitle = (title ?? target.title ?? defaultThreadTitle(pr)).trim();
+        threadTitle = (title ?? target.title ?? defaultThreadTitle(pr, intentName)).trim();
+        if (!target.scratch && !target.projectId) {
+          throw new ExtensionError("invalid_input", "Bitte ein Projekt wählen oder ohne Projekt starten.");
+        }
         const workspaceStrategy =
           target.workspace.type === "worktree"
             ? {
@@ -156,7 +195,12 @@ export function createHandlers({ connections, catalog, jobs }: RouterDeps): Hand
                 startFromOrigin: target.workspace.startFromOrigin ?? true,
               }
             : { type: "root" };
-        const args: Record<string, unknown> = {
+        const launched = await transport.callTool<{
+          threadId?: string;
+          thread?: { threadId?: string; link?: string; status?: Job["status"] };
+          link?: string;
+          status?: Job["status"];
+        }>("t3_thread_launch", {
           ...envArgs,
           clientRequestId: requestId,
           title: threadTitle,
@@ -165,19 +209,7 @@ export function createHandlers({ connections, catalog, jobs }: RouterDeps): Hand
           runtimeMode: target.runtimeMode ?? settings.defaultRuntimeMode,
           interactionMode: target.interactionMode ?? "default",
           ...(target.modelSelection ? { modelSelection: target.modelSelection } : {}),
-        };
-        if (!target.scratch && !target.projectId) {
-          throw new ExtensionError(
-            "invalid_input",
-            "Bitte ein Projekt auswählen oder „Ohne Projekt“ wählen.",
-          );
-        }
-        const launched = await transport.callTool<{
-          threadId?: string;
-          thread?: { threadId?: string; link?: string; title?: string; status?: Job["status"] };
-          link?: string;
-          status?: Job["status"];
-        }>("t3_thread_launch", args);
+        });
         threadId = launched.threadId ?? launched.thread?.threadId ?? "";
         if (!threadId)
           throw new ExtensionError("invalid_response", "T3 Code hat keine Thread-ID zurückgegeben.");
@@ -212,39 +244,90 @@ export function createHandlers({ connections, catalog, jobs }: RouterDeps): Hand
         threadTitle,
         link,
         prompt,
+        ...(intentId ? { intentId } : {}),
+        ...(intentName ? { intentName } : {}),
+        ...(pr.headBranch ? { branch: pr.headBranch } : {}),
         startedAt: now,
         updatedAt: now,
         status,
       };
-      await jobs.add(job);
-      if (settings.openInAppAfterDispatch) {
-        void openThread(connections, env, threadId, link).catch(() => undefined);
+      await sessions.addJob(job);
+      await saveSettings({ ...settings, lastPrUrl: pr.url });
+      if (settings.openInAppAfterDispatch) void openThread(connections, env, threadId).catch(() => undefined);
+      return { job, session: sessions.sessionFromJob(job) };
+    },
+
+    "project.create": async ({ envKey, pr, destinationPath, title }) => {
+      const project = await catalog.createProjectFromRepo(
+        envKey,
+        { owner: pr.owner, name: pr.repo, host: pr.host },
+        destinationPath,
+        title,
+      );
+      return { project };
+    },
+
+    "session.reply": async ({ envKey, threadId, message, mode, requestId }) => {
+      const { target, transport } = await catalog.resolve(envKey);
+      const envArgs = target.toolEnvironmentId ? { environmentId: target.toolEnvironmentId } : {};
+      let answered = false;
+      if (requestId) {
+        const job = await sessions.jobForThread(envKey, threadId);
+        const pending =
+          (job ? sessions.sessionFromJob(job).pending : undefined) ??
+          (await catalog.pendingQuestions(envKey, threadId).catch(() => []));
+        const question = pending?.find((q) => q.requestId === requestId);
+        if (question) {
+          try {
+            await catalog.respondToQuestion(envKey, threadId, question, message);
+            answered = true;
+          } catch {
+            answered = false;
+          }
+        }
       }
-      return { job };
+      if (!answered) {
+        await transport.callTool("t3_thread_send", {
+          ...envArgs,
+          clientRequestId: crypto.randomUUID(),
+          threadId,
+          message,
+          mode: mode ?? "auto",
+        });
+      }
+      catalog.invalidateThreads(envKey);
+      return { session: await sessionFor(envKey, threadId) };
     },
 
-    "threads.search": async ({ envKey, query, projectId }) => {
-      const threads: ThreadSummary[] = await catalog.searchThreads(envKey, query, projectId);
-      return { threads };
+    "session.stop": async ({ envKey, threadId }) => {
+      const { target, transport } = await catalog.resolve(envKey);
+      const envArgs = target.toolEnvironmentId ? { environmentId: target.toolEnvironmentId } : {};
+      await transport.callTool("t3_thread_interrupt", {
+        ...envArgs,
+        clientRequestId: crypto.randomUUID(),
+        threadId,
+        stop: true,
+        reason: "Vom Nutzer in GitHub gestoppt.",
+      });
+      catalog.invalidateThreads(envKey);
+      return { session: await sessionFor(envKey, threadId) };
     },
 
-    "threads.read": async ({ envKey, threadId }) => {
-      const { raw } = await catalog.readThread(envKey, threadId);
-      return summariseThreadRead(raw);
-    },
-
-    "jobs.list": async ({ pr }) => ({ jobs: await jobs.list(pr) }),
-    "jobs.refresh": async ({ jobId }) => ({ job: await jobs.refresh(jobId) }),
-    "jobs.dismiss": async ({ jobId }) => {
-      await jobs.dismiss(jobId);
+    "session.refresh": async ({ envKey, threadId }) => ({ session: await sessionFor(envKey, threadId) }),
+    "session.dismiss": async ({ jobId }) => {
+      await sessions.dismiss(jobId);
       return { ok: true };
     },
+    "sessions.inbox": async () => ({ sessions: await sessions.inbox() }),
+
+    "threads.search": async ({ envKey, query, projectId }) => ({
+      threads: await catalog.searchThreads(envKey, query, projectId),
+    }),
 
     "templates.list": async () => ({ templates: await allTemplates() }),
     "templates.save": async ({ template }) => {
       const custom = (await loadCustomTemplates()).filter((t) => t.id !== template.id);
-      const builtin = BUILTIN_TEMPLATES.some((t) => t.id === template.id);
-      custom.push({ ...template, builtin });
+      custom.push({ ...template, builtin: BUILTIN_TEMPLATES.some((t) => t.id === template.id) });
       await saveCustomTemplates(custom);
       return { templates: await allTemplates() };
     },
@@ -253,8 +336,7 @@ export function createHandlers({ connections, catalog, jobs }: RouterDeps): Hand
       return { templates: await allTemplates() };
     },
     "templates.import": async ({ templates }) => {
-      const custom = await loadCustomTemplates();
-      const map = new Map(custom.map((t) => [t.id, t]));
+      const map = new Map((await loadCustomTemplates()).map((t) => [t.id, t]));
       for (const template of templates) {
         map.set(template.id, { ...template, builtin: BUILTIN_TEMPLATES.some((t) => t.id === template.id) });
       }
@@ -269,13 +351,16 @@ export function createHandlers({ connections, catalog, jobs }: RouterDeps): Hand
       return { settings: merged };
     },
 
-    "thread.open": async ({ envKey, threadId, link }) => {
+    "thread.open": async ({ envKey, threadId }) => {
       const { target } = await catalog.resolve(envKey);
-      const opened = await openThread(connections, target, threadId, link);
-      return { ok: true, opened };
+      return { ok: true, opened: await openThread(connections, target, threadId) };
     },
-    "options.open": async () => {
-      await chrome.runtime.openOptionsPage();
+    "options.open": async ({ tab }) => {
+      if (tab) {
+        await chrome.tabs.create({ url: `${chrome.runtime.getURL("src/options/index.html")}#${tab}` });
+      } else {
+        await chrome.runtime.openOptionsPage();
+      }
       return { ok: true };
     },
   };
@@ -285,38 +370,11 @@ function stripUndefined<T extends object>(value: T): T {
   return Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined)) as T;
 }
 
-function summariseThreadRead(raw: unknown): { messages: ThreadMessagePreview[]; status: string } {
-  const data = (raw ?? {}) as {
-    status?: string;
-    thread?: { status?: string };
-    items?: Array<Record<string, unknown>>;
-    messages?: Array<Record<string, unknown>>;
-  };
-  const items = data.items ?? data.messages ?? [];
-  const messages: ThreadMessagePreview[] = [];
-  for (const item of items) {
-    const roleRaw = String(item.role ?? item.type ?? item.kind ?? "").toLowerCase();
-    const role: ThreadMessagePreview["role"] = roleRaw.includes("user")
-      ? "user"
-      : roleRaw.includes("assistant") || roleRaw.includes("agent")
-        ? "assistant"
-        : "system";
-    const text = String(item.text ?? item.content ?? item.body ?? "").trim();
-    if (!text) continue;
-    const createdAt = typeof item.createdAt === "string" ? item.createdAt : undefined;
-    messages.push({ role, text, ...(createdAt ? { createdAt } : {}) });
-  }
-  return { messages, status: data.thread?.status ?? data.status ?? "unknown" };
-}
-
 export function installRouter(deps: RouterDeps): void {
   const handlers = createHandlers(deps);
   chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) => {
     const parsed = requestSchema.safeParse(message);
-    if (!parsed.success) {
-      // Not one of ours (events use a different shape); ignore.
-      return false;
-    }
+    if (!parsed.success) return false;
     const request = parsed.data as ExtensionRequest;
     const handler = handlers[request.type] as (
       request: ExtensionRequest,
@@ -330,5 +388,3 @@ export function installRouter(deps: RouterDeps): void {
     return true;
   });
 }
-
-export { prKeyEquals };

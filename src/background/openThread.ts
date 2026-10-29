@@ -9,16 +9,13 @@ export async function openThread(
   connections: ConnectionManager,
   target: EnvironmentTarget,
   threadId: string,
-  _link: string,
 ): Promise<"app" | "web"> {
   const connection = await connections.get(target.connectionId);
   const path = `/${encodeURIComponent(target.environmentId)}/${encodeURIComponent(threadId)}`;
   const local = /^http:\/\/(127\.0\.0\.1|localhost)(:|$)/.test(connection.origin);
   if (local) {
-    const appUrl = `t3code://threads${path}`;
     try {
-      // Chrome hands registered custom schemes to the OS; close the helper tab once handed over.
-      const tab = await chrome.tabs.create({ url: appUrl, active: false });
+      const tab = await chrome.tabs.create({ url: `t3code://threads${path}`, active: false });
       setTimeout(() => {
         if (tab.id !== undefined) chrome.tabs.remove(tab.id).catch(() => undefined);
       }, 2000);

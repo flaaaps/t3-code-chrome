@@ -1,6 +1,7 @@
 import type {
   EnvironmentCapabilities,
   EnvironmentRef,
+  PendingQuestion,
   Project,
   ProviderInfo,
   ThreadStatus,
@@ -188,6 +189,8 @@ export class Catalog {
       );
       for (const raw of page.projects ?? []) {
         if (raw.deletedAt) continue;
+        // T3's own scratch folder is offered separately as "Ohne Projekt".
+        if (!raw.repositoryIdentity && /[\\/]\.t3[\\/]scratch$/.test(raw.workspaceRoot)) continue;
         const identity = raw.repositoryIdentity ?? undefined;
         const canonicalKey = identity?.canonicalKey ?? identity?.locator?.remoteUrl;
         projects.push({
@@ -254,17 +257,90 @@ export class Catalog {
     return raw.map((thread) => toThreadSummary(thread, envKey, target.environmentId));
   }
 
-  async readThread(envKey: string, threadId: string): Promise<{ raw: unknown }> {
+  /** Read a thread's state and last messages in a shape the UI can use. */
+  async readThread(envKey: string, threadId: string): Promise<ThreadRead> {
     const { target, transport } = await this.resolve(envKey);
-    const raw = await transport.callTool<unknown>("t3_thread_read", {
+    const raw = await transport.callTool<Record<string, unknown>>("t3_thread_read", {
       ...this.envArgs(target),
       threadId,
       view: "messages",
       limit: 6,
-      maxCharsPerItem: 1200,
+      maxCharsPerItem: 1500,
       runLimit: 2,
     });
-    return { raw };
+    return parseThreadRead(raw ?? {});
+  }
+
+  async pendingQuestions(envKey: string, threadId: string): Promise<PendingQuestion[]> {
+    const { target, transport } = await this.resolve(envKey);
+    const listed = await transport.callTool<Record<string, unknown>>("t3_pending_request", {
+      ...this.envArgs(target),
+      threadId,
+      action: "list",
+    });
+    const ids = extractRequestIds(listed);
+    const questions: PendingQuestion[] = [];
+    for (const requestId of ids.slice(0, 3)) {
+      try {
+        const detail = await transport.callTool<Record<string, unknown>>("t3_pending_request", {
+          ...this.envArgs(target),
+          threadId,
+          action: "read",
+          requestId,
+        });
+        questions.push(parsePendingQuestion(requestId, detail));
+      } catch {
+        questions.push({ requestId, text: "Der Agent wartet auf eine Antwort." });
+      }
+    }
+    return questions;
+  }
+
+  async respondToQuestion(
+    envKey: string,
+    threadId: string,
+    question: PendingQuestion,
+    answer: string,
+  ): Promise<void> {
+    const { target, transport } = await this.resolve(envKey);
+    const answers = buildAnswers(question, answer);
+    await transport.callTool("t3_pending_request", {
+      ...this.envArgs(target),
+      threadId,
+      action: "respond",
+      requestId: question.requestId,
+      answers,
+    });
+  }
+
+  async createProjectFromRepo(
+    envKey: string,
+    repo: { owner: string; name: string; host: string },
+    destinationPath: string,
+    title?: string,
+  ): Promise<Project> {
+    const { target, transport } = await this.resolve(envKey);
+    await transport.callTool("t3_project_clone", {
+      ...this.envArgs(target),
+      destinationPath,
+      remoteUrl: `https://${repo.host}/${repo.owner}/${repo.name}.git`,
+      protocol: "auto",
+    });
+    const created = await transport.callTool<{ project?: RawProject; id?: string; title?: string }>(
+      "t3_project_create",
+      {
+        ...this.envArgs(target),
+        title: title ?? repo.name,
+        workspaceRoot: destinationPath,
+      },
+    );
+    this.projects.delete(envKey);
+    const projects = await this.listProjects(envKey, true);
+    const id = created?.project?.id ?? created?.id;
+    const project =
+      projects.find((p) => p.id === id) ?? projects.find((p) => p.workspaceRoot === destinationPath);
+    if (!project) throw new Error("Das Projekt wurde angelegt, konnte aber nicht geladen werden.");
+    return project;
   }
 
   async capabilitiesOf(envKey: string, force = false): Promise<EnvironmentCapabilities> {
@@ -323,4 +399,123 @@ export function toThreadSummary(raw: RawThread, envKey: string, environmentId: s
     createdAt: raw.createdAt,
     updatedAt: raw.updatedAt,
   };
+}
+
+export interface ThreadRead {
+  status?: ThreadStatus;
+  updatedAt?: string;
+  title?: string;
+  model?: string;
+  lastAssistant?: { text: string; at?: string };
+  lastUser?: { text: string; at?: string };
+  lastRunId?: string;
+  error?: string;
+}
+
+const str = (value: unknown): string | undefined =>
+  typeof value === "string" && value.trim() ? value : undefined;
+
+function itemText(item: Record<string, unknown>): string {
+  const direct = str(item.text) ?? str(item.content) ?? str(item.body) ?? str(item.message);
+  if (direct) return direct;
+  const content = item.content;
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => (typeof part === "string" ? part : (str((part as Record<string, unknown>)?.text) ?? "")))
+      .filter(Boolean)
+      .join("\n");
+  }
+  return "";
+}
+
+function itemRole(item: Record<string, unknown>): "assistant" | "user" | "other" {
+  const role = String(item.role ?? item.type ?? item.kind ?? item.author ?? "").toLowerCase();
+  if (role.includes("assistant") || role.includes("agent")) return "assistant";
+  if (role.includes("user")) return "user";
+  return "other";
+}
+
+export function parseThreadRead(raw: Record<string, unknown>): ThreadRead {
+  const thread = (raw.thread ?? {}) as Record<string, unknown>;
+  const items = (raw.items ?? raw.messages ?? []) as Array<Record<string, unknown>>;
+  const runs = (raw.runs ?? thread.runs ?? []) as Array<Record<string, unknown>>;
+  const result: ThreadRead = {};
+  const status = str(thread.status) ?? str(raw.status);
+  if (status) result.status = status as ThreadStatus;
+  const updatedAt = str(thread.updatedAt) ?? str(raw.updatedAt);
+  if (updatedAt) result.updatedAt = updatedAt;
+  const title = str(thread.title) ?? str(raw.title);
+  if (title) result.title = title;
+  const model = str(thread.model) ?? str(raw.model);
+  if (model) result.model = model;
+  for (const item of items) {
+    const role = itemRole(item);
+    const text = itemText(item).trim();
+    if (!text) continue;
+    const at = str(item.createdAt) ?? str(item.updatedAt) ?? str(item.timestamp);
+    const entry = { text, ...(at ? { at } : {}) };
+    if (role === "assistant") result.lastAssistant = entry;
+    if (role === "user") result.lastUser = entry;
+  }
+  const lastRun = runs[runs.length - 1];
+  if (lastRun) {
+    const runId = str(lastRun.runId) ?? str(lastRun.id);
+    if (runId) result.lastRunId = runId;
+    const error = str(lastRun.error) ?? str((lastRun.error as Record<string, unknown> | undefined)?.message);
+    if (error) result.error = error;
+  }
+  return result;
+}
+
+function extractRequestIds(listed: Record<string, unknown> | undefined): string[] {
+  if (!listed) return [];
+  const candidates = (listed.requests ?? listed.pending ?? listed.items ?? listed.questions ?? []) as unknown;
+  if (!Array.isArray(candidates)) return [];
+  return candidates
+    .map((entry) =>
+      typeof entry === "string"
+        ? entry
+        : (str((entry as Record<string, unknown>).requestId) ?? str((entry as Record<string, unknown>).id)),
+    )
+    .filter((id): id is string => !!id);
+}
+
+function parsePendingQuestion(requestId: string, detail: Record<string, unknown>): PendingQuestion {
+  const request = (detail.request ?? detail) as Record<string, unknown>;
+  const questions = (request.questions ?? detail.questions) as Array<Record<string, unknown>> | undefined;
+  const first = questions?.[0];
+  const text =
+    str(first?.question) ??
+    str(first?.text) ??
+    str(first?.prompt) ??
+    str(request.question) ??
+    str(request.text) ??
+    str(request.prompt) ??
+    str(request.message) ??
+    "Der Agent wartet auf eine Antwort.";
+  const optionsRaw = (first?.options ?? request.options) as unknown;
+  const options = Array.isArray(optionsRaw)
+    ? optionsRaw
+        .map((option) =>
+          typeof option === "string"
+            ? option
+            : (str((option as Record<string, unknown>).label) ??
+              str((option as Record<string, unknown>).value)),
+        )
+        .filter((option): option is string => !!option)
+    : undefined;
+  return { requestId, text, ...(options && options.length > 0 ? { options } : {}), raw: detail };
+}
+
+function buildAnswers(question: PendingQuestion, answer: string): Record<string, unknown> {
+  const detail = (question.raw ?? {}) as Record<string, unknown>;
+  const request = (detail.request ?? detail) as Record<string, unknown>;
+  const questions = (request.questions ?? detail.questions) as Array<Record<string, unknown>> | undefined;
+  const key =
+    str(questions?.[0]?.id) ??
+    str(questions?.[0]?.key) ??
+    str(questions?.[0]?.header) ??
+    str(questions?.[0]?.question);
+  if (key) return { [key]: answer };
+  return { answer };
 }

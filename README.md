@@ -2,12 +2,21 @@
 
 # T3 Code for GitHub (Chrome extension)
 
-Hands GitHub pull requests to [T3 Code](https://t3.codes) sessions without leaving the PR page. On every
-`github.com/<owner>/<repo>/pull/<n>` page a **T3 Code** button opens a side panel where you pick a prompt
-template (review, address review comments, fix CI, reply to a comment, free prompt), choose a new or an
-existing T3 session, and send. The project matching the repository is preselected, sessions that already
-know this PR are listed first, and the status of what you sent is tracked in the panel, the toolbar badge and
-desktop notifications.
+Hands GitHub pull requests to [T3 Code](https://t3.codes) sessions without leaving the PR page.
+
+- **One click in the PR header.** A split button (`▶ Review starten | ▾`) dispatches the action that fits the
+  PR (review, fix failing CI, address requested changes, summarise a draft) with smart defaults: the T3 project
+  matching the repository, a worktree on the PR branch, your default model. A short countdown toast lets you
+  cancel or adjust.
+- **Steer agents inline.** An Agent-Box under the PR header lists every session working on this PR with its
+  last message. Answer questions, queue follow-ups, stop a run, or open the thread in T3 Code.
+- **Composer for the long tail.** "Anpassen…" opens a drawer: your text first, the target as one line (this
+  PR's sessions, new session in a project, scratch, search), review output (inline comments on GitHub or a
+  report in T3), model and mode under "Erweitert".
+- **Comments and selections.** A `T3 ▾` menu on every review comment implements it, answers it, or hands it
+  to the PR's running session. Selected text can be sent via the context menu.
+- **Inbox in the popup.** What waits for you first, then what runs, then what finished today, with an inline
+  reply field. First run is a three-step wizard (detect the local server, paste a pairing code, open a PR).
 
 The extension talks to T3 Code through its local MCP endpoint (`http://127.0.0.1:3773/mcp`), the same API the
 `t3` CLI uses. It needs no GitHub token: the agent in T3 fetches diff, comments and checks itself.
@@ -20,17 +29,17 @@ pnpm build          # writes dist/
 ```
 
 1. Open `chrome://extensions`, enable **Developer mode**, click **Load unpacked** and select `dist/`.
-2. Open the extension options (toolbar icon → *Optionen*). The local server `http://127.0.0.1:3773` is
-   prefilled; click **Hinzufügen**.
-3. Create a pairing code in T3 Code (Settings → Connections) or in a terminal:
+2. Click the toolbar icon. The popup finds the local T3 Code server on `127.0.0.1:3773` by itself.
+3. Create a pairing code in T3 Code (Settings → Connections → Pair a client) or in a terminal:
 
    ```sh
    t3 auth pairing create --ttl 10m --label "Chrome"
    ```
 
-   Paste the code, choose the access level (full access is recommended for reviews that push), click
-   **Koppeln**. The connection shows up in T3 Code under Settings → Connections and can be revoked there.
-4. Open any pull request on github.com and click **T3 Code** in the PR header (or press `Alt+Shift+T`).
+   Paste the code, keep **Vollzugriff** (recommended for reviews that push and comment), click **Koppeln**.
+   The connection shows up in T3 Code under Settings → Connections and can be revoked there.
+4. Open any pull request on github.com: the **Review starten** button sits in the PR header. `Alt+Shift+T`
+   opens the composer, `Cmd/Ctrl+Enter` sends, `Esc` closes.
 
 More T3 servers (for example another machine over Tailscale) can be added by URL. Linked environments of a
 server are offered automatically when T3 exposes them.
@@ -46,19 +55,20 @@ node test/e2e/run.mjs [--dispatch] [--headed] [--pr <url>]   # real Chrome + liv
 ```
 
 The end-to-end script builds nothing itself: run `pnpm build` first. It mints a pairing code with the `t3`
-CLI, pairs the extension, opens a public PR, checks project preselection and the session list, and with
-`--dispatch` starts a tiny scratch thread in T3 and waits for it to complete. Screenshots land in
+CLI, pairs the extension through the popup wizard, opens a public PR, checks the header action, the composer's
+target list and the guard against empty prompts, and with `--dispatch` starts a tiny scratch thread in T3 and
+waits for the Agent-Box to show it as finished. Screenshots land in
 `test/e2e/out/`.
 
 ## Layout
 
 ```
 src/background/   service worker: MCP client, OAuth pairing, catalog cache, job tracker, message router
-src/content/      GitHub integration: PR detection, DOM context, Shadow-DOM panel (Preact)
-src/popup/        toolbar popup: connection status and active sessions
-src/options/      options page: connections, prompt templates, defaults
+src/content/      GitHub integration: PR detection, DOM context, header split button, Agent-Box, composer (Preact + signals)
+src/popup/        toolbar popup: inbox (waiting / running / done) and first-run wizard
+src/options/      options page: connections, actions (prompt editor with live preview), defaults
 src/shared/       models, message schemas (zod), templates, ranking
-docs/             implementation plan and verified T3 API notes
+docs/             implementation plan, verified T3 API notes, UX review
 ```
 
 See [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) for the architecture and the verified T3

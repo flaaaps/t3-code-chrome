@@ -9,8 +9,7 @@ export function matchProject(projects: Project[], pr: PrKey): Project | undefine
   const ownerRepo = `${pr.owner}/${pr.repo}`.toLowerCase();
   const byName = projects.find((p) => p.repoDisplayName?.toLowerCase() === ownerRepo);
   if (byName) return byName;
-  const byTitle = projects.find((p) => p.title.toLowerCase() === pr.repo.toLowerCase());
-  return byTitle;
+  return projects.find((p) => p.title.toLowerCase() === pr.repo.toLowerCase());
 }
 
 export function threadMentionsPr(thread: ThreadSummary, pr: PrKey): boolean {
@@ -23,37 +22,43 @@ export function threadMentionsPr(thread: ThreadSummary, pr: PrKey): boolean {
 }
 
 export function threadMentionsPrInTitle(thread: ThreadSummary, pr: PrKey): boolean {
-  return new RegExp(`(?:#|pull/)${pr.number}(?!\\d)`).test(thread.title);
+  const repo = `${pr.owner}/${pr.repo}`.toLowerCase();
+  const title = thread.title.toLowerCase();
+  if (new RegExp(`${repo.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}#${pr.number}(?!\\d)`).test(title))
+    return true;
+  return new RegExp(`pull/${pr.number}(?!\\d)`).test(title);
 }
+
+export function threadIsLinked(thread: ThreadSummary, pr: PrKey): boolean {
+  return threadMentionsPr(thread, pr) || threadMentionsPrInTitle(thread, pr);
+}
+
+export type ThreadGroup = "this-pr" | "project-active" | "project" | "other";
 
 export interface RankedThread {
   thread: ThreadSummary;
-  rank: 0 | 1 | 2 | 3;
-  reason: "linked-pr" | "same-project-active" | "same-project" | "other";
+  group: ThreadGroup;
 }
 
 /**
  * Rank threads for a PR: linked to this PR first, then active threads of the matching project,
- * then settled threads of the project, then everything else. Within a rank, newest first.
+ * then settled threads of the project, then everything else. Within a group, newest first.
  */
 export function rankThreads(
   threads: ThreadSummary[],
   pr: PrKey,
   projectId: string | undefined,
 ): RankedThread[] {
+  const order: Record<ThreadGroup, number> = { "this-pr": 0, "project-active": 1, project: 2, other: 3 };
   const ranked: RankedThread[] = threads.map((thread) => {
-    if (threadMentionsPr(thread, pr) || threadMentionsPrInTitle(thread, pr)) {
-      return { thread, rank: 0, reason: "linked-pr" };
-    }
+    if (threadIsLinked(thread, pr)) return { thread, group: "this-pr" };
     if (projectId && thread.projectId === projectId) {
-      if (ACTIVE_THREAD_STATUSES.has(thread.status))
-        return { thread, rank: 1, reason: "same-project-active" };
-      return { thread, rank: 2, reason: "same-project" };
+      return { thread, group: ACTIVE_THREAD_STATUSES.has(thread.status) ? "project-active" : "project" };
     }
-    return { thread, rank: 3, reason: "other" };
+    return { thread, group: "other" };
   });
   ranked.sort((a, b) => {
-    if (a.rank !== b.rank) return a.rank - b.rank;
+    if (order[a.group] !== order[b.group]) return order[a.group] - order[b.group];
     return b.thread.updatedAt.localeCompare(a.thread.updatedAt);
   });
   return ranked;

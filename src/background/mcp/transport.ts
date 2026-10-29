@@ -1,4 +1,4 @@
-import { ExtensionError } from "@shared/errors";
+import { ExtensionError, translateServerMessage } from "@shared/errors";
 
 export const MCP_PROTOCOL_VERSION = "2025-06-18";
 
@@ -74,8 +74,13 @@ export class McpTransport {
   async callTool<T = unknown>(name: string, args: Record<string, unknown>): Promise<T> {
     const result = (await this.request("tools/call", { name, arguments: args })) as McpToolResult;
     if (result.isError) {
-      const text = result.content?.map((c) => c.text ?? "").join("\n") ?? "Tool call failed.";
-      throw new ExtensionError("tool_error", text.trim() || `Tool ${name} failed.`, result);
+      const text =
+        result.content?.map((c) => c.text ?? "").join("\n") ?? "Der Aufruf in T3 Code ist fehlgeschlagen.";
+      throw new ExtensionError(
+        "tool_error",
+        translateServerMessage(text.trim()) || `${name} ist in T3 Code fehlgeschlagen.`,
+        result,
+      );
     }
     if (result.structuredContent !== undefined) return result.structuredContent as T;
     const text = result.content?.find((c) => c.type === "text")?.text;
@@ -137,7 +142,11 @@ export class McpTransport {
               continue;
             }
           }
-          throw new ExtensionError("tool_error", response.error.message, response.error);
+          throw new ExtensionError(
+            "tool_error",
+            translateServerMessage(response.error.message),
+            response.error,
+          );
         }
         return response.result;
       } catch (error) {
@@ -156,7 +165,7 @@ export class McpTransport {
     options: { skipSession?: boolean; notification?: boolean } = {},
   ): Promise<{ payload: unknown; headers: Headers }> {
     const token = await this.options.accessToken();
-    if (!token) throw new ExtensionError("unauthenticated", "Not connected to T3 Code.");
+    if (!token) throw new ExtensionError("unauthenticated", "Nicht mit T3 Code verbunden.");
     const headers: Record<string, string> = {
       "content-type": "application/json",
       accept: "application/json, text/event-stream",
@@ -176,8 +185,9 @@ export class McpTransport {
         signal: controller.signal,
       });
     } catch (error) {
-      if (controller.signal.aborted) throw new ExtensionError("timeout", "T3 Code did not answer in time.");
-      throw new ExtensionError("unreachable", "T3 Code is not reachable. Is the desktop app running?", error);
+      if (controller.signal.aborted)
+        throw new ExtensionError("timeout", "T3 Code hat nicht rechtzeitig geantwortet.");
+      throw new ExtensionError("unreachable", "T3 Code antwortet nicht. Läuft die Desktop-App?", error);
     } finally {
       clearTimeout(timeout);
     }
@@ -186,12 +196,15 @@ export class McpTransport {
       this.options.onUnauthorized?.();
       throw new ExtensionError(
         "unauthenticated",
-        "The T3 Code connection expired or was revoked. Reconnect in the options.",
+        "Die Verbindung zu T3 Code ist abgelaufen oder wurde widerrufen. Bitte neu koppeln.",
       );
     }
     if (response.status === 403)
-      throw new ExtensionError("forbidden", "This connection lacks permission for that action.");
-    if (response.status === 404) throw new ExtensionError("not_found", "MCP session not found.");
+      throw new ExtensionError(
+        "forbidden",
+        "Diese Verbindung darf das nicht. Prüfe das Zugriffslevel der Kopplung in T3 Code.",
+      );
+    if (response.status === 404) throw new ExtensionError("not_found", "MCP-Sitzung nicht gefunden.");
     if (options.notification) {
       return { payload: undefined, headers: response.headers };
     }
@@ -199,7 +212,7 @@ export class McpTransport {
       const text = await response.text().catch(() => "");
       throw new ExtensionError(
         "invalid_response",
-        `T3 Code answered ${response.status}: ${text.slice(0, 200)}`,
+        `T3 Code antwortete mit ${response.status}: ${text.slice(0, 200)}`,
       );
     }
     const contentType = response.headers.get("content-type") ?? "";
@@ -214,7 +227,7 @@ export class McpTransport {
     } catch {
       throw new ExtensionError(
         "invalid_response",
-        "T3 Code returned a response the extension could not parse.",
+        "T3 Code hat eine Antwort geschickt, die die Extension nicht lesen kann.",
       );
     }
   }
@@ -223,7 +236,7 @@ export class McpTransport {
 /** Read an SSE stream until the JSON-RPC response for `id` arrives. */
 async function readSseResponse(response: Response, id: number | string | undefined): Promise<unknown> {
   const reader = response.body?.getReader();
-  if (!reader) throw new ExtensionError("invalid_response", "Empty response body.");
+  if (!reader) throw new ExtensionError("invalid_response", "Leere Antwort von T3 Code.");
   const decoder = new TextDecoder();
   let buffer = "";
   let fallback: unknown;
@@ -257,5 +270,5 @@ async function readSseResponse(response: Response, id: number | string | undefin
     }
   }
   if (fallback !== undefined) return fallback;
-  throw new ExtensionError("invalid_response", "The MCP stream ended without a response.");
+  throw new ExtensionError("invalid_response", "Der MCP-Stream endete ohne Antwort.");
 }

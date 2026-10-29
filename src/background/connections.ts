@@ -1,5 +1,12 @@
 import { ExtensionError } from "@shared/errors";
-import type { ConnectionAuth, ConnectionHealth, McpClientAccess, ServerConnection } from "@shared/models";
+import {
+  type ConnectionAuth,
+  type ConnectionHealth,
+  DEFAULT_LOCAL_ORIGIN,
+  type LinkState,
+  type McpClientAccess,
+  type ServerConnection,
+} from "@shared/models";
 import {
   approveInBrowser,
   approveWithPairingCode,
@@ -36,12 +43,33 @@ export class ConnectionManager {
 
   async get(id: string): Promise<ServerConnection> {
     const connection = (await loadConnections()).find((c) => c.id === id);
-    if (!connection) throw new ExtensionError("not_found", "Unknown T3 Code connection.");
+    if (!connection) throw new ExtensionError("not_found", "Unbekannte T3-Code-Verbindung.");
     return connection;
   }
 
   healthOf(id: string): ConnectionHealth {
     return this.health.get(id) ?? "unknown";
+  }
+
+  /** Overall link state: no connections, none paired, all offline, or at least one ready. */
+  async linkState(): Promise<LinkState> {
+    const connections = await loadConnections();
+    if (connections.length === 0) return "none";
+    const states = connections.map((c) => this.healthOf(c.id));
+    if (states.includes("connected")) return "ready";
+    if (states.includes("unauthenticated")) return "unpaired";
+    return "offline";
+  }
+
+  /** Add the default local server when it answers and is not configured yet. */
+  async autoDetectLocal(): Promise<ServerConnection | undefined> {
+    const existing = (await loadConnections()).find((c) => c.origin === DEFAULT_LOCAL_ORIGIN);
+    if (existing) return existing;
+    try {
+      return await this.add(DEFAULT_LOCAL_ORIGIN);
+    } catch {
+      return undefined;
+    }
   }
 
   async healthMap(): Promise<Record<string, ConnectionHealth>> {
@@ -88,7 +116,7 @@ export class ConnectionManager {
     const connections = await loadConnections();
     const index = connections.findIndex((c) => c.id === id);
     const current = connections[index];
-    if (index === -1 || !current) throw new ExtensionError("not_found", "Unknown T3 Code connection.");
+    if (index === -1 || !current) throw new ExtensionError("not_found", "Unbekannte T3-Code-Verbindung.");
     const next: ServerConnection = { ...current, ...patch };
     connections[index] = next;
     await saveConnections(connections);
@@ -175,7 +203,7 @@ export class ConnectionManager {
     if (probed.health !== "connected") {
       throw new ExtensionError(
         "unreachable",
-        "Paired, but the MCP endpoint did not answer. Check that T3 Code is running.",
+        "Gekoppelt, aber der MCP-Endpunkt antwortet nicht. Läuft T3 Code?",
       );
     }
     return probed.connection;

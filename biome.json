@@ -15,6 +15,13 @@
       "recommended": true,
       "suspicious": {
         "noExplicitAny": "warn"
+      },
+      "a11y": {
+        "useSemanticElements": "off",
+        "noSvgWithoutTitle": "off"
+      },
+      "style": {
+        "noDescendingSpecificity": "off"
       }
     }
   },

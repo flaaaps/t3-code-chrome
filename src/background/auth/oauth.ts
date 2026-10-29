@@ -1,4 +1,4 @@
-import { ExtensionError } from "@shared/errors";
+import { ExtensionError, translateServerMessage } from "@shared/errors";
 import type { ConnectionAuth, McpClientAccess } from "@shared/models";
 
 export interface OAuthMetadata {
@@ -43,15 +43,20 @@ async function fetchJson<T>(url: string, init?: RequestInit, timeoutMs = 8000): 
         `${response.status} ${response.statusText}`;
       throw new ExtensionError(
         response.status === 401 ? "unauthenticated" : "invalid_response",
-        description,
+        translateServerMessage(description),
         parsed,
       );
     }
     return parsed as T;
   } catch (error) {
     if (error instanceof ExtensionError) throw error;
-    if (controller.signal.aborted) throw new ExtensionError("timeout", `No answer from ${url} in time.`);
-    throw new ExtensionError("unreachable", "T3 Code is not reachable at that address.", error);
+    if (controller.signal.aborted)
+      throw new ExtensionError("timeout", "T3 Code hat nicht rechtzeitig geantwortet.");
+    throw new ExtensionError(
+      "unreachable",
+      "Unter dieser Adresse antwortet kein T3 Code. Läuft die Desktop-App?",
+      error,
+    );
   } finally {
     clearTimeout(timer);
   }
@@ -83,7 +88,10 @@ export function redirectUri(): string {
 
 export async function registerClient(metadata: OAuthMetadata): Promise<string> {
   if (!metadata.registration_endpoint) {
-    throw new ExtensionError("invalid_response", "This T3 Code server does not support client registration.");
+    throw new ExtensionError(
+      "invalid_response",
+      "Dieser T3-Code-Server unterstützt keine Client-Registrierung.",
+    );
   }
   const registered = await fetchJson<{ client_id: string }>(metadata.registration_endpoint, {
     method: "POST",
@@ -151,12 +159,12 @@ export async function approveWithPairingCode(
     }),
   }).catch((error: unknown) => {
     if (error instanceof ExtensionError && error.code === "invalid_response") {
-      throw new ExtensionError("invalid_input", `T3 Code rejected the pairing code: ${error.message}`);
+      throw new ExtensionError("invalid_input", translateServerMessage(error.message));
     }
     throw error;
   });
   if (!result.redirectTo)
-    throw new ExtensionError("invalid_response", "T3 Code did not return an authorization code.");
+    throw new ExtensionError("invalid_response", "T3 Code hat keinen Autorisierungscode zurückgegeben.");
   return extractCode(result.redirectTo, prepared.request.state);
 }
 
@@ -166,7 +174,7 @@ export async function approveInBrowser(prepared: PreparedAuthorization): Promise
     url: prepared.authorizeUrl,
     interactive: true,
   });
-  if (!responseUrl) throw new ExtensionError("cancelled", "The sign-in window was closed.");
+  if (!responseUrl) throw new ExtensionError("cancelled", "Das Anmeldefenster wurde geschlossen.");
   return extractCode(responseUrl, prepared.request.state);
 }
 
@@ -176,17 +184,14 @@ function extractCode(redirectUrl: string, expectedState: string): string {
   if (error) {
     throw new ExtensionError(
       "forbidden",
-      url.searchParams.get("error_description") ?? `Authorization failed: ${error}`,
+      url.searchParams.get("error_description") ?? `Freigabe fehlgeschlagen: ${error}`,
     );
   }
   if (url.searchParams.get("state") !== expectedState) {
-    throw new ExtensionError(
-      "invalid_response",
-      "The authorization response did not match the request (state).",
-    );
+    throw new ExtensionError("invalid_response", "Die Antwort von T3 Code passt nicht zur Anfrage (state).");
   }
   const code = url.searchParams.get("code");
-  if (!code) throw new ExtensionError("invalid_response", "The authorization response has no code.");
+  if (!code) throw new ExtensionError("invalid_response", "Die Antwort von T3 Code enthält keinen Code.");
   return code;
 }
 

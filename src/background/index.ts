@@ -1,16 +1,17 @@
 import type { ExtensionEvent } from "@shared/messages";
+import { ACTIVE_THREAD_STATUSES } from "@shared/models";
 import { parsePrUrl } from "@shared/prKey";
 import { Catalog } from "./catalog";
 import { ConnectionManager } from "./connections";
-import { JobTracker } from "./jobs";
 import { syncOriginRules } from "./netRules";
 import { installRouter } from "./router";
+import { SessionTracker } from "./sessions";
 
 const connections = new ConnectionManager();
 const catalog = new Catalog(connections);
-const jobs = new JobTracker(catalog);
+const sessions = new SessionTracker(catalog);
 
-installRouter({ connections, catalog, jobs });
+installRouter({ connections, catalog, sessions });
 
 async function broadcast(event: ExtensionEvent): Promise<void> {
   const tabs = await chrome.tabs.query({ url: "https://github.com/*" });
@@ -22,13 +23,13 @@ async function broadcast(event: ExtensionEvent): Promise<void> {
   chrome.runtime.sendMessage(event).catch(() => undefined);
 }
 
-jobs.onChange((all) => {
-  void broadcast({ type: "jobs.updated", jobs: all });
+sessions.onChange((all) => {
+  void broadcast({ type: "sessions.updated", sessions: all });
   void updateBadge();
 });
 
 connections.onChange(() => {
-  void broadcast({ type: "connections.updated" });
+  void connections.linkState().then((link) => broadcast({ type: "connections.updated", link }));
   void connections
     .list()
     .then(syncOriginRules)
@@ -36,32 +37,42 @@ connections.onChange(() => {
 });
 
 async function updateBadge(): Promise<void> {
-  const active = (await jobs.list()).filter((job) =>
-    ["preparing", "queued", "starting", "running", "waiting"].includes(job.status),
-  );
-  const waiting = active.filter((job) => job.status === "waiting").length;
-  await chrome.action.setBadgeText({ text: active.length > 0 ? String(active.length) : "" });
-  await chrome.action.setBadgeBackgroundColor({ color: waiting > 0 ? "#d97706" : "#4f46e5" });
+  const inbox = await sessions.inbox();
+  const active = inbox.filter((session) => ACTIVE_THREAD_STATUSES.has(session.status));
+  const waiting = active.filter((session) => session.status === "waiting").length;
+  await chrome.action.setBadgeText({
+    text: waiting > 0 ? String(waiting) : active.length > 0 ? String(active.length) : "",
+  });
+  await chrome.action.setBadgeBackgroundColor({ color: waiting > 0 ? "#bf8700" : "#0969da" });
 }
 
+// Panels and popups keep a port open while visible: poll quickly and stay awake.
+chrome.runtime.onConnect.addListener((port) => {
+  if (!port.name.startsWith("live:")) return;
+  sessions.setLive(1);
+  port.onDisconnect.addListener(() => sessions.setLive(-1));
+});
+
 chrome.alarms.onAlarm.addListener((alarm) => {
-  void jobs.handleAlarm(alarm.name);
+  void sessions.handleAlarm(alarm.name);
 });
 
 chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.create({
     id: "t3-send-selection",
-    title: "Mit T3 Code bearbeiten…",
+    title: "An T3 Code senden…",
     contexts: ["selection"],
     documentUrlPatterns: ["https://github.com/*/pull/*"],
   });
-  void jobs.ensureAlarm();
+  void sessions.ensureAlarm();
 });
 
 chrome.contextMenus.onClicked.addListener((info, tab) => {
   if (info.menuItemId !== "t3-send-selection" || tab?.id === undefined) return;
-  const selection = (info.selectionText ?? "").trim();
-  const event: ExtensionEvent = { type: "panel.openWithSelection", selection };
+  const event: ExtensionEvent = {
+    type: "panel.openWithSelection",
+    selection: (info.selectionText ?? "").trim(),
+  };
   chrome.tabs.sendMessage(tab.id, event).catch(() => undefined);
 });
 
@@ -74,9 +85,9 @@ chrome.commands.onCommand.addListener((command, tab) => {
 chrome.notifications?.onClicked.addListener((notificationId) => {
   if (!notificationId.startsWith("job:")) return;
   void (async () => {
-    const job = (await jobs.list()).find((j) => `job:${j.id}` === notificationId);
-    if (!job) return;
-    const url = `https://${job.pr.host}/${job.pr.owner}/${job.pr.repo}/pull/${job.pr.number}`;
+    const session = (await sessions.inbox()).find((s) => `job:${s.jobId}` === notificationId);
+    if (!session) return;
+    const url = `https://${session.pr.host}/${session.pr.owner}/${session.pr.repo}/pull/${session.pr.number}`;
     const [existing] = await chrome.tabs.query({ url: `${url}*` });
     if (existing?.id !== undefined) await chrome.tabs.update(existing.id, { active: true });
     else await chrome.tabs.create({ url });
@@ -84,15 +95,14 @@ chrome.notifications?.onClicked.addListener((notificationId) => {
   })();
 });
 
-// Warm up health on start so the first panel open is fast.
 void (async () => {
   await syncOriginRules(await connections.list()).catch(() => undefined);
   for (const connection of await connections.list()) {
     await connections.probe(connection.id).catch(() => undefined);
   }
   await updateBadge();
-  const active = (await jobs.list()).some((job) =>
-    ["preparing", "queued", "starting", "running", "waiting", "idle"].includes(job.status),
-  );
-  if (active) await jobs.ensureAlarm();
+  const inbox = await sessions.inbox();
+  if (inbox.some((session) => ACTIVE_THREAD_STATUSES.has(session.status) || session.status === "idle")) {
+    await sessions.ensureAlarm();
+  }
 })();

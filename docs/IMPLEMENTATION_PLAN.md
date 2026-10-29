@@ -290,4 +290,7 @@ Beim Spike und in der Implementierung geklärt (Stand 2026-10-29):
 
 ## 10. Stand der Umsetzung
 
+**Redesign (2026-10-29, nach UX-Review in `docs/UX_REVIEW.md`):** Das Formular-Panel wurde durch drei Oberflächen ersetzt: Split-Button im PR-Header mit kontextabhängiger Primäraktion und 5-Sekunden-Abbruch-Toast, inline Agent-Box unter dem Header (Status, letzte Agentennachricht, Antwortfeld bei `waiting` über `t3_pending_request`/`t3_thread_send`, Nachschieben mit queue/steer, Stop über `t3_thread_interrupt`, Branch-Konfliktwarnung), schlanker Composer-Drawer (Textfeld zuerst, Ziel als Combobox mit Gruppen, Ergebnis-Schalter, Erweitert). Dazu: Popup als Inbox mit Erstlauf-Wizard und Auto-Erkennung des lokalen Servers, Kommentar-Menü `T3 ▾`, Aktionen-Editor mit Live-Vorschau, Projekt anlegen per `t3_project_clone` + `t3_project_create`, Live-Polling alle 5 s über einen offenen Port, deutsche Fehlertexte mit ehrlicher Unterscheidung von „nicht gekoppelt“ und „läuft nicht“.
+
+
 Alle vier Phasen sind umgesetzt und gegen den echten T3-Server getestet (`node test/e2e/run.mjs --dispatch`): Pairing, Projekt-Vorauswahl, Session-Liste mit PR-Priorisierung, Start eines Threads, Senden an bestehende Threads, Status-Tracking bis `completed`, Kommentar-Buttons, Kontextmenü, Popup, Optionen mit Template-Editor, Benachrichtigungen. Unit-Tests decken URL-Parsing, Repo-Matching, Thread-Ranking und Template-Rendering ab.
