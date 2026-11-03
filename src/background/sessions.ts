@@ -220,6 +220,56 @@ export class SessionTracker {
     return sessions;
   }
 
+  /**
+   * Sessions for many PRs at once (the PR list page). One cached thread listing per environment,
+   * matched locally; no per-thread reads, so linked threads show the status from the listing (and
+   * the last message only when it is already cached).
+   */
+  async sessionsForPrs(prs: PrKey[]): Promise<Record<string, Session[]>> {
+    const result: Record<string, Session[]> = {};
+    for (const pr of prs) {
+      result[prKeyToString(pr)] = [];
+      this.knownPrs.set(prKeyToString(pr), pr);
+    }
+    if (prs.length === 0) return result;
+    const seen = new Set<string>();
+    const jobs = (await loadJobs()).filter((job) => !job.dismissed);
+    for (const job of jobs) {
+      const list = result[prKeyToString(job.pr)] ?? this.findBucket(result, prs, job.pr);
+      if (!list) continue;
+      list.push(this.sessionFromJob(job));
+      seen.add(job.threadId);
+    }
+    const environments = await this.catalog.listEnvironments().catch(() => []);
+    const threads = (
+      await Promise.all(
+        environments
+          .filter((env) => env.reachable)
+          .map((env) => this.catalog.listThreads(env.key).catch(() => [] as ThreadSummary[])),
+      )
+    ).flat();
+    for (const thread of threads) {
+      if (seen.has(thread.threadId)) continue;
+      for (const pr of prs) {
+        if (!threadIsLinked(thread, pr)) continue;
+        // A cached read only counts while it describes the same thread state as the listing.
+        const cached = this.reads.get(thread.threadId);
+        const read = cached?.value.updatedAt === thread.updatedAt ? cached : undefined;
+        result[prKeyToString(pr)]?.push(this.sessionFromThread(thread, pr, read));
+        seen.add(thread.threadId);
+        break;
+      }
+    }
+    for (const list of Object.values(result)) list.sort(compareSessions);
+    return result;
+  }
+
+  /** Bucket for a job whose PR key differs only in letter case from a requested one. */
+  private findBucket(result: Record<string, Session[]>, prs: PrKey[], pr: PrKey): Session[] | undefined {
+    const match = prs.find((candidate) => prKeyEquals(candidate, pr));
+    return match ? result[prKeyToString(match)] : undefined;
+  }
+
   /** Everything the extension tracks, across PRs, for the popup inbox. */
   async inbox(): Promise<Session[]> {
     const jobs = (await loadJobs()).filter((job) => !job.dismissed);

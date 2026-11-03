@@ -110,6 +110,7 @@ const settingsSchema = z.object({
   openInAppAfterDispatch: z.boolean(),
   dispatchDelaySeconds: z.number().int().min(0).max(30),
   enterpriseHosts: z.array(z.string()),
+  pullsPanelsEnabled: z.boolean(),
   lastPrUrl: z.string().optional(),
 });
 
@@ -131,6 +132,11 @@ export const requestSchema = z.discriminatedUnion("type", [
 
   z.object({ type: z.literal("pr.overview"), pr: prKeySchema, force: z.boolean().optional() }),
   z.object({ type: z.literal("pr.sessions"), pr: prKeySchema, refresh: z.boolean().optional() }),
+  z.object({
+    type: z.literal("prs.sessions"),
+    prs: z.array(prKeySchema).max(100),
+    refresh: z.boolean().optional(),
+  }),
   z.object({
     type: z.literal("pr.dispatch"),
     pr: prContextSchema,
@@ -202,6 +208,8 @@ export interface ResponseMap {
   "connections.disconnect": { ok: true };
   "pr.overview": PrOverview;
   "pr.sessions": { sessions: Session[] };
+  /** Sessions per PR, keyed by `prKeyToString`; PRs without sessions map to an empty list. */
+  "prs.sessions": { sessions: Record<string, Session[]> };
   "pr.dispatch": { job: Job; session: Session };
   "project.create": { project: Project };
   "session.reply": { session: Session };

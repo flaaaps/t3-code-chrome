@@ -1,22 +1,49 @@
-import { type PrLocation, parsePrUrl, prKeyEquals } from "@shared/prKey";
+import {
+  type PrLocation,
+  parsePrUrl,
+  parsePullsUrl,
+  prKeyEquals,
+  type RepoKey,
+  repoKeyEquals,
+} from "@shared/prKey";
 
-export type PrListener = (location: PrLocation | undefined) => void;
+/** The kind of GitHub page the extension cares about. */
+export type PageLocation = { kind: "pr"; pr: PrLocation } | { kind: "pulls"; repo: RepoKey };
+
+export type LocationListener = (location: PageLocation | undefined) => void;
+
+export function parsePageLocation(href: string): PageLocation | undefined {
+  const pr = parsePrUrl(href, "any");
+  if (pr) return { kind: "pr", pr };
+  const repo = parsePullsUrl(href, "any");
+  if (repo) return { kind: "pulls", repo };
+  return undefined;
+}
+
+/** Same page for the extension's purposes: same PR and tab, or the same repository's PR list. */
+export function samePage(a: PageLocation | undefined, b: PageLocation | undefined): boolean {
+  if (!a || !b) return a === b;
+  if (a.kind === "pr" && b.kind === "pr") return prKeyEquals(a.pr, b.pr) && a.pr.tab === b.pr.tab;
+  if (a.kind === "pulls" && b.kind === "pulls") return repoKeyEquals(a.repo, b.repo);
+  return false;
+}
 
 /**
- * Watch GitHub's client-side navigation (Turbo) and report the current PR, if any. The host is not
- * checked: the content script is only injected into GitHub and GitHub Enterprise pages.
+ * Watch GitHub's client-side navigation (Turbo, and the React data router's `pushState`) and report
+ * the current PR or PR list, if any. Filter or page changes on the PR list (`?q=`, `?page=`) do not
+ * count as a change. The host is not checked: the content script only runs on GitHub pages.
  * Fires immediately with the current state.
  */
-export function watchPrLocation(listener: PrListener): () => void {
-  let current = parsePrUrl(window.location.href, "any");
+export function watchLocation(listener: LocationListener): () => void {
+  let current = parsePageLocation(window.location.href);
   let currentHref = window.location.href;
   listener(current);
 
   const check = () => {
     if (window.location.href === currentHref) return;
     currentHref = window.location.href;
-    const next = parsePrUrl(currentHref, "any");
-    const changed = !prKeyEquals(current, next) || current?.tab !== next?.tab;
+    const next = parsePageLocation(currentHref);
+    const changed = !samePage(current, next);
     current = next;
     if (changed) listener(next);
   };

@@ -1,5 +1,5 @@
-import type { ExtensionEvent } from "@shared/client";
-import type { PrLocation } from "@shared/prKey";
+import { type ExtensionEvent, sendRequest } from "@shared/client";
+import type { PrLocation, RepoKey } from "@shared/prKey";
 import { matchesShortcut, parseShortcut } from "@shared/shortcut";
 import { h, render } from "preact";
 import {
@@ -11,11 +11,14 @@ import {
   isIssueBody,
 } from "./github/mountPoints";
 import { commentFromSelection, describeComment, readPrContext } from "./github/prContext";
-import { watchPrLocation } from "./github/prDetector";
+import { watchLocation } from "./github/prDetector";
+import { findPullsAnchor, readViewer } from "./github/pullsPage";
 import { AgentBox } from "./ui/AgentBox";
 import { CommentMenu } from "./ui/CommentMenu";
 import { Composer } from "./ui/Composer";
 import { HeaderAction } from "./ui/HeaderAction";
+import { PullsPanels } from "./ui/PullsPanels";
+import * as pulls from "./ui/pullsStore";
 import * as store from "./ui/store";
 import { PANEL_STYLES } from "./ui/styles";
 import { Toast } from "./ui/Toast";
@@ -24,8 +27,11 @@ const OVERLAY_ID = "t3-code-chrome-host";
 const HEADER_ID = "t3-code-chrome-trigger";
 const AGENTBOX_ID = "t3-code-chrome-agentbox";
 const COMMENT_CLASS = "t3-code-chrome-comment";
+const PULLS_ID = "t3-code-chrome-pulls";
 
 let currentPr: PrLocation | undefined;
+let currentPulls: RepoKey | undefined;
+let pullsActivation = 0;
 let observer: MutationObserver | undefined;
 let mountScheduled = false;
 let rereadTimer: number | undefined;
@@ -139,14 +145,64 @@ function mountCommentMenus(): void {
   }
 }
 
+// --- PR list panels ------------------------------------------------------------------------
+
+let pullsHost: Host | undefined;
+
+function mountPullsPanels(): void {
+  if (pullsHost?.element.isConnected) return;
+  const anchor = findPullsAnchor();
+  if (!anchor) return;
+  if (!pullsHost) {
+    pullsHost = makeHost(PULLS_ID);
+    pullsHost.element.style.display = "block";
+    render(h(PullsPanels, null), pullsHost.root);
+  }
+  pullsHost.element.dataset.position = anchor.position;
+  // Re-inserting the same host keeps the Preact tree and its state (no refetch, no flicker).
+  if (anchor.position === "before") anchor.node.insertAdjacentElement("beforebegin", pullsHost.element);
+  else anchor.node.insertAdjacentElement("afterbegin", pullsHost.element);
+}
+
+function unmountPullsPanels(): void {
+  if (!pullsHost) return;
+  render(null, pullsHost.root);
+  pullsHost.element.remove();
+  pullsHost = undefined;
+}
+
+async function activatePulls(repo: RepoKey): Promise<void> {
+  const run = ++pullsActivation;
+  const viewer = readViewer();
+  if (!viewer) return; // logged out: the panels need "@me"
+  const enabled = await sendRequest({ type: "settings.get" })
+    .then(({ settings }) => settings.pullsPanelsEnabled !== false)
+    .catch(() => true);
+  if (!enabled || run !== pullsActivation) return;
+  currentPulls = repo;
+  pulls.activate(repo, viewer);
+  mountAll();
+  observe();
+}
+
 // --- lifecycle --------------------------------------------------------------------------
 
 function mountAll(): void {
-  if (!currentPr) return;
-  mountOverlay();
-  mountHeader();
-  mountAgentBox();
-  mountCommentMenus();
+  if (currentPr) {
+    mountOverlay();
+    mountHeader();
+    mountAgentBox();
+    mountCommentMenus();
+  } else if (currentPulls) {
+    mountOverlay();
+    mountPullsPanels();
+  }
+}
+
+function observe(): void {
+  observer?.disconnect();
+  observer = new MutationObserver(() => scheduleMount());
+  observer.observe(document.body, { childList: true, subtree: true });
 }
 
 function scheduleMount(): void {
@@ -162,9 +218,7 @@ function activate(location: PrLocation): void {
   currentPr = location;
   store.setPr(readPrContext(location));
   mountAll();
-  observer?.disconnect();
-  observer = new MutationObserver(() => scheduleMount());
-  observer.observe(document.body, { childList: true, subtree: true });
+  observe();
   // GitHub fills in header details lazily; re-read the context once more.
   if (rereadTimer) window.clearTimeout(rereadTimer);
   rereadTimer = window.setTimeout(() => {
@@ -178,6 +232,10 @@ function activate(location: PrLocation): void {
 
 function deactivate(): void {
   currentPr = undefined;
+  currentPulls = undefined;
+  pullsActivation += 1;
+  pulls.deactivate();
+  unmountPullsPanels();
   observer?.disconnect();
   observer = undefined;
   store.setPr(undefined);
@@ -224,7 +282,13 @@ document.addEventListener(
   true,
 );
 
-watchPrLocation((location) => {
+watchLocation((page) => {
+  if (page?.kind === "pulls") {
+    deactivate();
+    void activatePulls(page.repo);
+    return;
+  }
+  const location = page?.pr;
   if (!location) {
     deactivate();
     return;
@@ -244,6 +308,17 @@ watchPrLocation((location) => {
 });
 
 chrome.runtime.onMessage.addListener((message: ExtensionEvent) => {
+  if (currentPulls) {
+    if (message.type === "sessions.updated") {
+      pulls.onSessionsChanged();
+      if (store.pr.value) store.applySessionsEvent(message.sessions);
+    }
+    if (message.type === "connections.updated") {
+      pulls.onConnectionsChanged();
+      if (store.status.value === "error" && store.pr.value) void store.load(true);
+    }
+    return;
+  }
   if (!currentPr) return;
   switch (message.type) {
     case "panel.toggle":

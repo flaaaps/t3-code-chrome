@@ -3,7 +3,7 @@ import type { PrLocation } from "@shared/prKey";
 import { prUrl } from "@shared/prKey";
 
 const OWN_HOSTS =
-  "#t3-code-chrome-host, #t3-code-chrome-trigger, #t3-code-chrome-agentbox, .t3-code-chrome-comment";
+  "#t3-code-chrome-host, #t3-code-chrome-trigger, #t3-code-chrome-agentbox, #t3-code-chrome-pulls, .t3-code-chrome-comment";
 
 function isOwn(node: Element | null | undefined): boolean {
   return !!node?.closest(OWN_HOSTS);

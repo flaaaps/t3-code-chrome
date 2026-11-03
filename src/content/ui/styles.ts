@@ -137,12 +137,72 @@ code { font-family: var(--t3-mono); font-size: 12px; background: var(--t3-bg-mut
 .t3-mode button + button { border-left: 1px solid var(--t3-border); }
 .t3-mode button.active { background: var(--t3-accent-muted); color: var(--t3-accent-fg); font-weight: 600; }
 
+/* ---- PR list panels ---- */
+.t3-pulls { margin: 16px 0; }
+/* Before GitHub's React app the panels sit outside its padded layout: match its gutter. */
+:host([data-position="before"]) .t3-pulls { margin: 16px 24px 0; }
+@media (max-width: 767px) { :host([data-position="before"]) .t3-pulls { margin: 16px 16px 0; } }
+.t3-pulls-body { display: flex; flex-direction: column; }
+.t3-pulls-body > .t3-alert { margin: 12px; }
+.t3-panel + .t3-panel { border-top: 1px solid var(--t3-border); }
+.t3-panel-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px 8px; }
+.t3-panel-head h3 { margin: 0; font-size: 12px; font-weight: 600; color: var(--t3-fg); }
+.t3-panel-head .spacer { flex: 1; }
+.t3-counter { font-size: 11px; font-weight: 500; line-height: 18px; padding: 0 6px; border-radius: 999px; background: var(--t3-bg-inset); border: 1px solid var(--t3-border-muted); color: var(--t3-fg); }
+.t3-panel-link { font-size: 12px; color: var(--t3-accent-fg); text-decoration: none; }
+.t3-panel-link:hover { text-decoration: underline; }
+.t3-panel-empty { margin: 0; padding: 2px 12px 12px 38px; color: var(--t3-fg-muted); font-size: 12.5px; }
+.t3-prlist { list-style: none; margin: 0; padding: 0; }
+.t3-prrow { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 4px 10px; align-items: start; padding: 8px 12px; border-top: 1px solid var(--t3-border-muted); }
+.t3-prrow:hover { background: var(--t3-bg-muted); }
+.t3-prrow .state { padding-top: 2px; color: var(--t3-success-fg); display: inline-flex; }
+.t3-prrow .state.draft { color: var(--t3-fg-muted); }
+.t3-prrow .main { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.t3-prrow .line1 { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 6px; min-width: 0; }
+.t3-prrow .title { font-weight: 600; font-size: 14px; color: var(--t3-fg); text-decoration: none; overflow-wrap: anywhere; }
+.t3-prrow .title:hover { color: var(--t3-accent-fg); text-decoration: underline; }
+.t3-prrow .line2 { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: 12px; color: var(--t3-fg-muted); min-width: 0; }
+.t3-prrow .comments { display: inline-flex; align-items: center; gap: 3px; }
+.t3-prrow-actions { align-self: center; }
+.t3-prrow-session { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; }
+.t3-prrow-session .what { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 420px; color: var(--t3-fg-muted); }
+.t3-stack-toggle { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--t3-border); background: var(--t3-bg); border-radius: 999px; padding: 0 8px 0 4px; font-size: 11px; line-height: 18px; color: var(--t3-fg); white-space: nowrap; }
+.t3-stack-toggle:hover { background: var(--t3-bg-inset); }
+.t3-stack-toggle svg { transform: rotate(-90deg); transition: transform 0.12s ease; }
+.t3-stack-toggle.open svg { transform: none; }
+.t3-stack-toggle .t3-dot { width: 6px; height: 6px; }
+.t3-prrow.stacked { padding-left: calc(12px + var(--depth, 1) * 22px); border-top-style: dashed; background: var(--t3-bg-muted); }
+.t3-stacked-on { color: var(--t3-fg-muted); font-style: italic; }
+.t3-badge { font-size: 11px; line-height: 16px; padding: 0 6px; border-radius: 999px; border: 1px solid var(--t3-border); color: var(--t3-fg-muted); white-space: nowrap; }
+.t3-label { font-size: 11px; font-weight: 500; line-height: 18px; padding: 0 7px; border-radius: 999px; border: 1px solid var(--t3-border); background: var(--t3-bg-muted); color: var(--t3-fg); white-space: nowrap; }
+.t3-label.colored { background: color-mix(in srgb, var(--label) 18%, transparent); border-color: color-mix(in srgb, var(--label) 45%, transparent); color: color-mix(in srgb, var(--label) 55%, var(--t3-fg)); }
+.t3-split.small > button { padding: 1px 8px; line-height: 20px; }
+.t3-split.small > button:last-child { padding: 1px 5px; }
+.t3-split .label { max-width: 160px; overflow: hidden; text-overflow: ellipsis; }
+.t3-menu-group { font-size: 11px; font-weight: 600; color: var(--t3-fg-muted); padding: 4px 10px 2px; }
+.t3-menu-item:disabled { opacity: 0.5; }
+.t3-menu-item .ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.t3-skel { display: block; background: var(--t3-border-muted); border-radius: 4px; animation: t3-pulse 1.4s ease-in-out infinite; }
+.t3-skel.icon { width: 16px; height: 16px; border-radius: 50%; }
+.t3-skel.line { height: 10px; margin: 3px 0; }
+.t3-prrow.skeleton:hover { background: none; }
+@media (max-width: 767px) {
+  .t3-prrow { grid-template-columns: 16px minmax(0, 1fr); }
+  .t3-prrow-actions { grid-column: 2; justify-self: start; }
+  .t3-prrow-actions .t3-menu { left: 0; right: auto; }
+  .t3-prrow-session .what { max-width: 220px; }
+}
+
 /* ---- composer drawer ---- */
 .t3-overlay { position: fixed; inset: 0; z-index: 2147483000; pointer-events: none; }
 .t3-drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(400px, 100vw); background: var(--t3-bg); border-left: 1px solid var(--t3-border); box-shadow: var(--t3-shadow); display: flex; flex-direction: column; pointer-events: auto; }
 .t3-drawer[hidden] { display: none; }
 .t3-drawer-head { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--t3-border); }
 .t3-drawer-head h2 { margin: 0; font-size: 14px; font-weight: 600; flex: 1; display: flex; align-items: center; gap: 8px; }
+.t3-drawer-pr { padding: 8px 14px; border-bottom: 1px solid var(--t3-border-muted); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.t3-drawer-pr a { color: var(--t3-fg); text-decoration: none; }
+.t3-drawer-pr a:hover { color: var(--t3-accent-fg); text-decoration: underline; }
+.t3-drawer-pr .num { color: var(--t3-fg-muted); }
 .t3-chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 14px 0; }
 .t3-chip { border: 1px solid var(--t3-border); background: var(--t3-bg); border-radius: 999px; padding: 2px 10px; font-size: 12px; color: var(--t3-fg); }
 .t3-chip:hover { background: var(--t3-bg-muted); }

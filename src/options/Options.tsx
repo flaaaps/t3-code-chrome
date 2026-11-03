@@ -737,6 +737,21 @@ function Settings() {
           <span>Wenn eine Session fertig ist oder fehlschlägt</span>
         </label>
       </div>
+      <div class="card">
+        <h2>PR-Übersicht</h2>
+        <label class="check">
+          <input
+            type="checkbox"
+            checked={settings.pullsPanelsEnabled}
+            onChange={(e) => void update({ pullsPanelsEnabled: (e.target as HTMLInputElement).checked })}
+          />
+          <span>Pull Requests auf der Übersichtsseite in Panels gliedern (Review angefragt · Meine)</span>
+        </label>
+        <span class="hint">
+          Die Panels lesen die GitHub-Seite mit deiner Anmeldung im Browser; ein GitHub-Token ist nicht nötig.
+          Änderungen gelten beim nächsten Öffnen der Übersicht.
+        </span>
+      </div>
       <EnterpriseCard hosts={settings.enterpriseHosts} update={update} />
       <ShortcutCard />
       {saved ? <div class="alert success">Gespeichert.</div> : null}

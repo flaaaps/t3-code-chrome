@@ -17,13 +17,13 @@ export const DEMO_PR = {
 };
 
 const ENVIRONMENT_ID = "demo-env-0001";
-const prLink = {
+const prLink = (number = DEMO_PR.number) => ({
   host: "github.com",
   repository: "flaaaps/pondus",
-  number: 5,
-  url: DEMO_PR.url,
+  number,
+  url: `https://github.com/flaaaps/pondus/pull/${number}`,
   state: "open",
-};
+});
 
 const projects = [
   {
@@ -70,7 +70,8 @@ const thread = (id, projectId, title, status, model, updatedMinutes, linked) => 
   providerInstanceId: "claudeAgent",
   model,
   runtimeMode: "full-access",
-  pullRequests: linked ? [prLink] : [],
+  // `linked`: true for the demo PR, a number for another PR of the demo repo.
+  pullRequests: linked === true ? [prLink()] : typeof linked === "number" ? [prLink(linked)] : [],
   settled: !["running", "waiting", "queued", "starting"].includes(status),
   parentThreadId: null,
   createdAt: minutesAgo(updatedMinutes + 30),
@@ -98,6 +99,16 @@ export const threads = [
     "claude-sonnet-5-5",
     60 * 50,
     false,
+  ),
+  // Review request on the PR list (showcase of the /pulls panels).
+  thread(
+    "t-timer",
+    "p-pondus",
+    "Review: Satzpausen-Timer im Sperrbildschirm",
+    "running",
+    "claude-sonnet-5-5",
+    6,
+    8,
   ),
   thread("t-web", "p-web", "Dark Mode für das Dashboard", "completed", "claude-opus-5-5", 60 * 8, false),
   thread("t-api", "p-api", "Rate-Limit für Exporte", "running", "claude-opus-5-5", 12, false),

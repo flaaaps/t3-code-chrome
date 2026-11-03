@@ -19,6 +19,10 @@ Hands GitHub pull requests to [T3 Code](https://t3.codes) sessions without leavi
   report in T3), model and mode under "Erweitert".
 - **Comments and selections.** A `T3 ▾` menu on every review comment implements it, answers it, or hands it
   to the PR's running session. Selected text can be sent via the context menu.
+- **PR list in panels.** On a repository's pull request list, "Review angefragt" and "Meine Pull Requests"
+  (authored or assigned) sit above GitHub's own list. Every row shows its T3 sessions and a split button:
+  open the running session, or start the fitting action (review for requests, summary for your own PRs).
+  Stacked PRs (one merging into another's branch) collapse into one row with a "Stack · n PRs" toggle.
 - **Inbox in the popup.** What waits for you first, then what runs, then what finished today, with an inline
   reply field. First run is a three-step wizard (detect the local server, paste a pairing code, open a PR).
 
@@ -35,6 +39,12 @@ Hands GitHub pull requests to [T3 Code](https://t3.codes) sessions without leavi
       <p><b>Short countdown.</b> One-click actions wait a few seconds so you can cancel or adjust them.</p>
       <img src="docs/screenshots/popup-inbox.png" alt="Toolbar popup listing sessions that wait, run, and finished today" width="300">
       <p><b>Inbox in the toolbar.</b> Answer a waiting agent from any tab.</p>
+    </td>
+  </tr>
+  <tr>
+    <td colspan="2">
+      <img src="docs/screenshots/pulls-panels.png" alt="PR list with the panels Review angefragt and Meine Pull Requests, session badges and a split button per row">
+      <p><b>The PR list, sorted by what needs you.</b> Review requests first, then your own and assigned PRs. Rows with a waiting or running agent rise to the top; the button opens that session or starts the next action.</p>
     </td>
   </tr>
   <tr>

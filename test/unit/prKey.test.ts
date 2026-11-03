@@ -5,7 +5,9 @@ import {
   normaliseEnterpriseHost,
   normaliseRepoIdentifier,
   parsePrUrl,
+  parsePullsUrl,
   prKeyEquals,
+  pullsPath,
   repoCanonicalKey,
 } from "../../src/shared/prKey";
 
@@ -103,5 +105,35 @@ describe("repository identifiers", () => {
 
   it("builds the canonical key for a PR", () => {
     expect(repoCanonicalKey({ host: "github.com", owner: "A", repo: "B" })).toBe("github.com/a/b");
+  });
+});
+
+describe("parsePullsUrl", () => {
+  it("parses the PR list with and without filters", () => {
+    const expected = { host: "github.com", owner: "a", repo: "b" };
+    expect(parsePullsUrl("https://github.com/a/b/pulls")).toEqual(expected);
+    expect(parsePullsUrl("https://www.github.com/a/b/pulls/")).toEqual(expected);
+    expect(parsePullsUrl("https://github.com/a/b/pulls?q=is%3Apr+author%3A%40me&page=2")).toEqual(expected);
+  });
+  it("rejects sub-pages, other pages and foreign hosts", () => {
+    expect(parsePullsUrl("https://github.com/a/b/pulls/123")).toBeUndefined();
+    expect(parsePullsUrl("https://github.com/a/b/pull/123")).toBeUndefined();
+    expect(parsePullsUrl("https://github.com/a/b/issues")).toBeUndefined();
+    expect(parsePullsUrl("https://github.com/pulls")).toBeUndefined();
+    expect(parsePullsUrl("https://gitlab.com/a/b/pulls")).toBeUndefined();
+  });
+  it("accepts enterprise hosts when listed or when hosts are not checked", () => {
+    expect(parsePullsUrl("https://git.acme.corp/a/b/pulls", ["git.acme.corp"])?.host).toBe("git.acme.corp");
+    expect(parsePullsUrl("https://git.acme.corp/a/b/pulls", "any")?.host).toBe("git.acme.corp");
+    expect(parsePullsUrl("https://git.acme.corp/a/b/pulls")).toBeUndefined();
+  });
+});
+
+describe("pullsPath", () => {
+  it("encodes the search query like GitHub does", () => {
+    expect(pullsPath({ host: "github.com", owner: "a", repo: "b" })).toBe("/a/b/pulls");
+    expect(pullsPath({ host: "github.com", owner: "a", repo: "b" }, "is:pr state:open author:@me")).toBe(
+      "/a/b/pulls?q=is%3Apr+state%3Aopen+author%3A%40me",
+    );
   });
 });

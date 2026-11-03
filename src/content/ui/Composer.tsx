@@ -97,6 +97,13 @@ export function Composer({ returnFocusTo }: { returnFocusTo: () => void }) {
             <Icon name="close" />
           </button>
         </header>
+        {store.composerShowsPr.value ? (
+          <div class="t3-drawer-pr">
+            <a href={context.url} title={context.title}>
+              <span class="num">#{context.number}</span> {context.title}
+            </a>
+          </div>
+        ) : null}
 
         {status === "error" && error ? (
           <div class="t3-drawer-body">

@@ -172,6 +172,12 @@ export function createHandlers({ connections, catalog, sessions }: RouterDeps): 
       sessions: await sessions.sessionsForPr(pr, { refreshLinked: refresh === true }),
     }),
 
+    "prs.sessions": async ({ prs, refresh }) => {
+      await requireLink(refresh === true);
+      if (refresh) catalog.invalidateThreads();
+      return { sessions: await sessions.sessionsForPrs(prs) };
+    },
+
     "pr.dispatch": async ({ pr, target, prompt, title, intentId, intentName, clientRequestId }) => {
       const requestId = clientRequestId ?? crypto.randomUUID();
       const { target: env, transport } = await catalog.resolve(target.envKey);

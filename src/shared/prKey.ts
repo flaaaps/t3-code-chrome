@@ -89,6 +89,50 @@ export function parsePrUrl(
   return { host, owner, repo, number, tab };
 }
 
+export interface RepoKey {
+  host: string;
+  owner: string;
+  repo: string;
+}
+
+const PULLS_PATH = /^\/([^/]+)\/([^/]+)\/pulls\/?$/;
+
+/**
+ * Parse a repository's pull request list (`/<owner>/<repo>/pulls`). Filters and pages (`?q=`,
+ * `?page=`) are ignored; `/pulls/<n>`, `/pulls/new` and other sub-pages are not the list.
+ */
+export function parsePullsUrl(
+  input: string | URL,
+  hosts: readonly string[] | "any" = [],
+): RepoKey | undefined {
+  let url: URL;
+  try {
+    url = typeof input === "string" ? new URL(input, "https://github.com") : input;
+  } catch {
+    return undefined;
+  }
+  if (hosts !== "any" && !isGitHubHost(url.hostname, hosts)) return undefined;
+  const match = PULLS_PATH.exec(url.pathname);
+  if (!match?.[1] || !match[2]) return undefined;
+  const host = url.hostname.toLowerCase() === "www.github.com" ? "github.com" : url.hostname.toLowerCase();
+  return { host, owner: match[1], repo: match[2] };
+}
+
+export function repoKeyEquals(a: RepoKey | undefined, b: RepoKey | undefined): boolean {
+  if (!a || !b) return a === b;
+  return (
+    a.host === b.host &&
+    a.owner.toLowerCase() === b.owner.toLowerCase() &&
+    a.repo.toLowerCase() === b.repo.toLowerCase()
+  );
+}
+
+/** Path of the repository's PR list, optionally with a search query (`is:pr state:open …`). */
+export function pullsPath(repo: RepoKey, query?: string): string {
+  const base = `/${repo.owner}/${repo.repo}/pulls`;
+  return query ? `${base}?q=${encodeURIComponent(query).replace(/%20/g, "+")}` : base;
+}
+
 export function prKeyEquals(a: PrKey | undefined, b: PrKey | undefined): boolean {
   if (!a || !b) return a === b;
   return (

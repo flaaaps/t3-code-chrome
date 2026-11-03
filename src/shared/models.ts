@@ -298,6 +298,8 @@ export interface ExtensionSettings {
   dispatchDelaySeconds: number;
   /** GitHub Enterprise Server hosts (e.g. `github.acme.corp`); github.com and `*.ghe.com` are built in. */
   enterpriseHosts: string[];
+  /** Group the repository's PR list (`/pulls`) into "Review angefragt" and "Meine Pull Requests". */
+  pullsPanelsEnabled: boolean;
   lastPrUrl?: string;
 }
 
@@ -311,6 +313,7 @@ export const DEFAULT_SETTINGS: ExtensionSettings = {
   openInAppAfterDispatch: false,
   dispatchDelaySeconds: 5,
   enterpriseHosts: [],
+  pullsPanelsEnabled: true,
 };
 
 export const DEFAULT_LOCAL_ORIGIN = "http://127.0.0.1:3773";

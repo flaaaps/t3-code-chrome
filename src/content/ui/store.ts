@@ -56,6 +56,8 @@ export const toast = signal<Toast | undefined>(undefined);
 /** Key bound to the open-panel command, as the browser reports it (e.g. "⌥⇧T"); "" when unassigned. */
 export const shortcut = signal<string>("");
 export const agentBoxCollapsed = signal(false);
+/** The composer names the PR it writes about (on the PR list, where several PRs are in view). */
+export const composerShowsPr = signal(false);
 
 export const composerOpen = signal(false);
 export const composerIntentId = signal<string>("builtin:review");
@@ -76,6 +78,7 @@ export const setupError = signal<string | undefined>(undefined);
 let livePort: chrome.runtime.Port | undefined;
 let toastTimer: ReturnType<typeof setInterval> | undefined;
 let pendingOpen: (() => void) | undefined;
+let loading: Promise<void> | undefined;
 
 export const intent = computed(() => {
   const list = templates.value;
@@ -112,15 +115,17 @@ export const missing = computed(() => {
 
 // --- loading -------------------------------------------------------------
 
-export function setPr(context: PrContext | undefined): void {
+/** Switch the PR the store works on; resolves when its overview has loaded (or failed). */
+export function setPr(context: PrContext | undefined): Promise<void> {
   const changed = !prKeyEquals(pr.value, context);
   pr.value = context;
   if (!context) {
     status.value = "idle";
     overview.value = undefined;
     sessions.value = [];
+    loading = undefined;
     closeLive();
-    return;
+    return Promise.resolve();
   }
   if (changed) {
     overview.value = undefined;
@@ -129,8 +134,29 @@ export function setPr(context: PrContext | undefined): void {
     composerCustomPrompt.value = undefined;
     composerComment.value = undefined;
     composerNote.value = "";
-    void load(false);
+    loading = load(false);
   }
+  return loading ?? Promise.resolve();
+}
+
+/**
+ * Make a PR from the list the active one and wait until projects and sessions are known, so a
+ * one-click action can pick its default target. A newer call for another PR wins.
+ */
+export async function activateContext(context: PrContext): Promise<boolean> {
+  if (prKeyEquals(pr.value, context) && status.value === "ready") {
+    // Same PR: keep the loaded overview but take the richer context (branch read meanwhile).
+    pr.value = context;
+    const data = overview.value;
+    if (data && composerTarget.value?.kind === "new") composerTarget.value = defaultTarget(data, context);
+    return true;
+  }
+  if (prKeyEquals(pr.value, context) && status.value === "error") {
+    pr.value = context;
+    loading = load(true);
+  }
+  await setPr(context);
+  return prKeyEquals(pr.value, context) && status.value === "ready";
 }
 
 export async function load(force: boolean): Promise<void> {
@@ -446,7 +472,7 @@ async function dispatch(
 
 // --- one-click action with countdown ------------------------------------------
 
-export function quickDispatch(intentId: string): void {
+export function quickDispatch(intentId: string, options: { detailPrefix?: string } = {}): void {
   const context = pr.value;
   const data = overview.value;
   const template = templates.value.find((t) => t.id === intentId);
@@ -502,7 +528,9 @@ export function quickDispatch(intentId: string): void {
     run();
     return;
   }
-  const detail = `${template.actionLabel ?? template.name} · ${targetLabel(choice, context)}`;
+  const detail = [options.detailPrefix, template.actionLabel ?? template.name, targetLabel(choice, context)]
+    .filter(Boolean)
+    .join(" · ");
   showToast({
     id: crypto.randomUUID(),
     kind: "countdown",

@@ -2,9 +2,14 @@ import type { PrContext, PromptTemplate } from "./models";
 
 /**
  * Pick the primary action for a PR from its visible state: draft → summarise, failing checks →
- * fix CI, changes requested on the viewer's own PR → address comments, otherwise review.
+ * fix CI, changes requested on the viewer's own PR → address comments, otherwise `fallbackId`
+ * (review on the PR page; the PR list uses summarise for the viewer's own PRs).
  */
-export function suggestIntent(pr: PrContext, templates: PromptTemplate[]): PromptTemplate {
+export function suggestIntent(
+  pr: PrContext,
+  templates: PromptTemplate[],
+  fallbackId = "builtin:review",
+): PromptTemplate {
   const byId = (id: string) => templates.find((t) => t.id === id);
   const own = !!pr.viewer && !!pr.author && pr.viewer.toLowerCase() === pr.author.toLowerCase();
   if (pr.checksState === "failure" && own) return byId("builtin:fix-ci") ?? fallback(templates);
@@ -13,7 +18,7 @@ export function suggestIntent(pr: PrContext, templates: PromptTemplate[]): Promp
   }
   if (pr.isDraft) return byId("builtin:summarize") ?? fallback(templates);
   if (pr.checksState === "failure") return byId("builtin:fix-ci") ?? fallback(templates);
-  return byId("builtin:review") ?? fallback(templates);
+  return byId(fallbackId) ?? byId("builtin:review") ?? fallback(templates);
 }
 
 function fallback(templates: PromptTemplate[]): PromptTemplate {

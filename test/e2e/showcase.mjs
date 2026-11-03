@@ -209,6 +209,187 @@ try {
   await page.screenshot({ path: shot("composer-comment"), clip: drawerBox });
   log("composer-comment");
 
+  // --- PR list panels (/pulls) ------------------------------------------------------------
+  // The real list page of the demo repo, signed in as the demo user, with the three searches the
+  // panels run answered from demo data (the demo repo has no open PRs).
+  const pullsUrl = `https://github.com/${DEMO_PR.owner}/${DEMO_PR.repo}/pulls`;
+  const hoursAgo = (hours) => new Date(Date.now() - hours * 3_600_000).toISOString();
+  const demoPr = (number, title, author, hours, extra = {}) => ({
+    number,
+    title,
+    titleHtml: { value: title },
+    author: { displayLogin: author },
+    permalink: `${pullsUrl.replace(/pulls$/, "pull")}/${number}`,
+    repoNameWithOwner: `${DEMO_PR.owner}/${DEMO_PR.repo}`,
+    state: "REPO_PULL_REQUEST_STATE_OPEN",
+    displayState: "REPO_PULL_REQUEST_DISPLAY_STATE_OPEN",
+    createdAt: hoursAgo(hours + 30),
+    updatedAt: hoursAgo(hours),
+    commentCount: 0,
+    ...extra,
+  });
+  const demoLists = {
+    "author:@me": [
+      demoPr(5, "fix(workout): kein leerer Screen nach Beenden der Live Activity", "flaaaps", 0.1, {
+        commentCount: 4,
+        labels: [{ name: "bug", color: "d73a4a" }],
+      }),
+      demoPr(4, "feat(mobile): Glocke am Pausenende über Kopfhörer", "flaaaps", 26, {
+        labels: [{ name: "feature", color: "a2eeef" }],
+      }),
+      demoPr(9, "Live Activities: Spike für den Sperrbildschirm", "flaaaps", 72, { isDraft: true }),
+      demoPr(11, "Glocke: Lautstärke folgt der Systemeinstellung", "flaaaps", 20),
+      demoPr(12, "Glocke: Schalter in den Einstellungen", "flaaaps", 2, { commentCount: 1 }),
+    ],
+    "assignee:@me": [
+      demoPr(4, "feat(mobile): Glocke am Pausenende über Kopfhörer", "flaaaps", 26, {
+        labels: [{ name: "feature", color: "a2eeef" }],
+      }),
+      demoPr(6, "Offline-Outbox beim Beenden flushen", "lena-dev", 5, { commentCount: 2 }),
+    ],
+    "review-requested:@me": [
+      demoPr(8, "Satzpausen-Timer im Sperrbildschirm", "tobi-k", 0.3, { commentCount: 1 }),
+      demoPr(7, "Statistik: Wochenvolumen pro Muskelgruppe", "lena-dev", 4, {
+        labels: [
+          { name: "feature", color: "a2eeef" },
+          { name: "ui", color: "c5def5" },
+        ],
+      }),
+    ],
+  };
+  const embedded =
+    /(<script type="application\/json" data-target="react-app\.embeddedData">)([\s\S]*?)(<\/script>)/;
+  // Branches for the stack grouping: #4 ← #11 ← #12, everything else merges into main.
+  const demoBranches = {
+    4: ["main", "feat/bell"],
+    11: ["feat/bell", "feat/bell-volume"],
+    12: ["feat/bell-volume", "feat/bell-settings"],
+    5: ["main", DEMO_PR.head],
+  };
+  await context.route(`https://github.com/${DEMO_PR.owner}/${DEMO_PR.repo}/pull/*/hovercard`, (route) => {
+    const number = Number(new URL(route.request().url()).pathname.split("/").at(-2));
+    const [base, head] = demoBranches[number] ?? ["main", `demo/pr-${number}`];
+    const ref = (kind, branch) =>
+      `<span id="${kind}-ref-${number}" class="commit-ref${kind === "base" ? " base-ref" : ""}"><span class="user">${DEMO_PR.owner}</span>:${branch}</span>`;
+    return route.fulfill({
+      contentType: "text/html",
+      body: `<div class="tmp-p-3">${ref("base", base)}<span>&larr;</span>${ref("head", head)}</div>`,
+    });
+  });
+  let pullsFetches = 0;
+  await context.route(`${pullsUrl}*`, async (route) => {
+    const response = await route.fetch();
+    let body = (await response.text()).replace(
+      /<meta name="user-login" content="[^"]*"/,
+      `<meta name="user-login" content="${DEMO_PR.owner}"`,
+    );
+    const query = new URL(route.request().url()).searchParams.get("q") ?? "";
+    const role = Object.keys(demoLists).find((key) => query.includes(key));
+    if (role) {
+      pullsFetches += 1;
+      const results = demoLists[role];
+      body = body.replace(embedded, (_, open, json, close) => {
+        const data = JSON.parse(json);
+        data.payload.repoPullsDashboardContentRoute = {
+          results,
+          currentPage: 1,
+          totalPages: 1,
+          totalCount: results.length,
+          openCount: results.length,
+          closedCount: 0,
+        };
+        return `${open}${JSON.stringify(data)}${close}`;
+      });
+    }
+    await route.fulfill({ response, body, headers: { ...response.headers(), "content-type": "text/html" } });
+  });
+  await worker.evaluate(async (pr) => {
+    const { jobs } = await chrome.storage.local.get("jobs");
+    await chrome.storage.local.set({
+      pullsPanelsCollapsed: false,
+      jobs: [
+        ...jobs,
+        {
+          id: "job-t-timer",
+          clientRequestId: "req-t-timer",
+          pr: { ...pr, number: 8 },
+          envKey: jobs[0].envKey,
+          threadId: "t-timer",
+          threadTitle: "Review: Satzpausen-Timer im Sperrbildschirm",
+          link: "t3-thread://v2/demo-env-0001/t-timer",
+          prompt: "…",
+          startedAt: Date.now() - 20 * 60_000,
+          updatedAt: Date.now() - 6 * 60_000,
+          status: "running",
+        },
+      ],
+    });
+  }, pr);
+
+  const list = await context.newPage();
+  await list.setViewportSize({ width: 1280, height: 900 });
+  await list.goto(pullsUrl, { waitUntil: "domcontentloaded" });
+  const panelsHost = list.locator("#t3-code-chrome-pulls");
+  await panelsHost.locator(".t3-prrow:not(.skeleton)").nth(4).waitFor({ timeout: 30000 });
+  await panelsHost.locator(".t3-status.waiting").first().waitFor({ timeout: 20000 });
+  await panelsHost.locator(".t3-stack-toggle").waitFor({ timeout: 20000 });
+  if (pullsFetches < 3) throw new Error(`expected 3 list fetches, saw ${pullsFetches}`);
+  await list.waitForTimeout(600);
+  await list.screenshot({ path: path.join(root, "test/e2e/out/review/pulls-page.png") });
+  const listBounds = list.viewportSize();
+  const panelsBox = await panelsHost.locator(".t3-pulls").boundingBox();
+  await list.evaluate((y) => window.scrollTo(0, y), Math.max(0, (panelsBox?.y ?? 0) - 24));
+  await list.waitForTimeout(300);
+  // Measured after scrolling, so the box is already in viewport coordinates.
+  const panelsArea = await panelsHost.locator(".t3-pulls").boundingBox();
+  await list.screenshot({ path: shot("pulls-panels"), clip: pad(panelsArea, 16, listBounds) });
+  log("pulls-panels");
+
+  // the stack, opened
+  await panelsHost.locator(".t3-stack-toggle").click();
+  await panelsHost.locator(".t3-prrow.stacked").nth(1).waitFor();
+  await list.waitForTimeout(200);
+  const mineBox = await panelsHost.locator(".t3-panel").nth(1).boundingBox();
+  await list.screenshot({ path: shot("pulls-stack"), clip: pad(mineBox, 8, listBounds) });
+  log("pulls-stack");
+  await panelsHost.locator(".t3-stack-toggle").click();
+
+  // row menu on the first review request (running session → "Session öffnen")
+  const firstRow = panelsHost.locator(".t3-prrow").first();
+  await firstRow.getByRole("button", { name: /Weitere Aktionen/ }).click();
+  const rowMenu = firstRow.locator(".t3-menu:not([hidden])");
+  await rowMenu.waitFor();
+  await list.waitForTimeout(200);
+  const rowMenuArea = union(await rowMenu.boundingBox(), await firstRow.boundingBox());
+  await list.screenshot({ path: shot("pulls-row-menu"), clip: pad(rowMenuArea, 16, listBounds) });
+  log("pulls-row-menu");
+  await list.keyboard.press("Escape");
+
+  // one-click from a row without a session: countdown names the PR, then cancel
+  const reviewRow = panelsHost.locator(".t3-prrow").nth(1);
+  await reviewRow.locator(".t3-split > button").first().click();
+  const listToast = list.locator("#t3-code-chrome-host .t3-toast");
+  await listToast.waitFor({ timeout: 30000 });
+  const toastText = (await listToast.textContent()) ?? "";
+  if (!toastText.includes("#7")) throw new Error(`countdown toast does not name the PR: ${toastText}`);
+  await listToast.getByRole("button", { name: "Abbrechen" }).click();
+  log("pulls one-click countdown ok");
+
+  // review set: narrow and dark
+  await list.setViewportSize({ width: 760, height: 900 });
+  await list.waitForTimeout(400);
+  await panelsHost
+    .locator(".t3-pulls")
+    .screenshot({ path: path.join(root, "test/e2e/out/review/pulls-narrow-760.png") });
+  await list.emulateMedia({ colorScheme: "dark" });
+  await list.setViewportSize({ width: 1280, height: 900 });
+  await list.waitForTimeout(400);
+  await panelsHost
+    .locator(".t3-pulls")
+    .screenshot({ path: path.join(root, "test/e2e/out/review/pulls-dark.png") });
+  log("pulls review set");
+  await list.close();
+
   console.log(`\nScreenshots written to ${path.relative(root, outDir)}/`);
 } finally {
   await context.close();
