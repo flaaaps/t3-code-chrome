@@ -174,11 +174,17 @@ export interface PrStackEntry {
   number: number;
   title: string;
   headBranch?: string;
+  /** Branch this PR merges into; when missing, the head of the open PR below (or the stack's base). */
+  baseBranch?: string;
   state: "open" | "merged" | "closed";
 }
 
-/** The native GitHub stack a PR belongs to. */
+/**
+ * The stack a PR belongs to: a native GitHub stack, or PRs chained by branches (one PR's base is
+ * another open PR's head).
+ */
 export interface PrStack {
+  source: "native" | "branches";
   /** Branch the bottom PR merges into. */
   baseBranch?: string;
   /** Every PR in the stack, bottom (merges into `baseBranch`) first. */

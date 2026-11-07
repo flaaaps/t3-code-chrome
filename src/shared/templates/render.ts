@@ -110,9 +110,26 @@ export function listPlaceholders(body: string): string[] {
   return [...names];
 }
 
-/** Whether a template offers the whole-stack review (`{{review.stack}}`). */
-export function usesStackReview(body: string): boolean {
-  return listPlaceholders(body).includes("review.stack");
+type StackTemplate = Pick<PromptTemplate, "id" | "body" | "reviewOutput">;
+
+const isReview = (template: StackTemplate) =>
+  template.reviewOutput === true || template.id === "builtin:review";
+
+/** Whether a template offers the whole-stack review: it uses `{{review.stack}}` or is a review action. */
+export function usesStackReview(template: StackTemplate): boolean {
+  return listPlaceholders(template.body).includes("review.stack") || isReview(template);
+}
+
+/**
+ * The body to render. A review action without `{{review.stack}}` (customised before the placeholder
+ * existed) gets it before its "Vorgehen:" steps, else at the end; empty when the PR has no stack.
+ */
+export function templateBody(template: StackTemplate): string {
+  const { body } = template;
+  if (!isReview(template) || listPlaceholders(body).includes("review.stack")) return body;
+  const steps = body.search(/\n\s*\nVorgehen:/);
+  if (steps >= 0) return `${body.slice(0, steps)}\n\n{{review.stack}}${body.slice(steps)}`;
+  return `${body}\n\n{{review.stack}}`;
 }
 
 /** Which required inputs of a template are still missing. */

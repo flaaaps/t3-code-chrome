@@ -1,14 +1,15 @@
 import type { PrStack } from "@shared/models";
 import type { PrKey } from "@shared/prKey";
 import { extractEmbeddedData } from "@shared/pulls";
-import { parsePrStack } from "@shared/stack";
+import { discoverBranchStack, parsePrStack } from "@shared/stack";
+import { loadPrFacts, searchPulls } from "./pullsPage";
 
 const EMBEDDED = 'script[data-target="react-app.embeddedData"]';
 /** GitHub's stack navigator in the PR header ("1/2"), new PR experience only. */
 const STACK_BADGE = "button[class*='stackBadge'], [aria-label^='Navigate pull request stack']";
 
 /**
- * The stack from the page's embedded data. `null`: the PR is in no stack. `undefined`: the data
+ * The native stack from the page's embedded data. `null`: the PR is in no stack. `undefined`: the data
  * describes another page (it stays from the first load across soft navigations) or is missing.
  */
 export function stackFromPage(pr: PrKey): PrStack | null | undefined {
@@ -42,4 +43,13 @@ export async function fetchStack(pr: PrKey): Promise<PrStack | undefined> {
   } catch {
     return undefined;
   }
+}
+
+/** PRs chained to this one by branches, via GitHub's PR search and hovercards (both cached). */
+export function branchStack(pr: PrKey & { title: string }): Promise<PrStack | undefined> {
+  const repo = { host: pr.host, owner: pr.owner, repo: pr.repo };
+  return discoverBranchStack(pr, {
+    search: (query) => searchPulls(repo, query),
+    facts: loadPrFacts,
+  });
 }

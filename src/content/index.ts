@@ -16,7 +16,7 @@ import {
 import { commentFromSelection, describeComment, readPrContext } from "./github/prContext";
 import { watchLocation } from "./github/prDetector";
 import { findPullsAnchor, readViewer } from "./github/pullsPage";
-import { fetchStack, hasStackBadge, stackFromPage } from "./github/stack";
+import { branchStack, fetchStack, hasStackBadge, stackFromPage } from "./github/stack";
 import { AgentBox } from "./ui/AgentBox";
 import { CommentMenu } from "./ui/CommentMenu";
 import { Composer } from "./ui/Composer";
@@ -249,13 +249,28 @@ function readContext(location: PrLocation): PrContext {
   return context;
 }
 
+/**
+ * Find the PR's stack. A native GitHub stack comes from the page's embedded data, or from a fetch
+ * of the PR page once GitHub's stack badge shows (the data is stale after a soft navigation).
+ * PRs chained by branches are looked up alongside; a native stack wins over them.
+ */
 function ensureStack(location: PrLocation): void {
   if (stackPhase === "done") return;
   if (stackPhase === "page") {
     const fromPage = stackFromPage(location);
-    if (fromPage !== undefined) {
+    if (fromPage) {
       stackPhase = "done";
-      if (fromPage) applyStack(location, fromPage);
+      applyStack(location, fromPage);
+      return;
+    }
+    const context = store.pr.value;
+    if (!/merged|closed/i.test(context?.state ?? "")) {
+      void branchStack({ ...location, title: context?.title ?? "" }).then((stack) => {
+        if (stack) applyStack(location, stack);
+      });
+    }
+    if (fromPage === null) {
+      stackPhase = "done";
       return;
     }
     stackPhase = "badge";
@@ -271,8 +286,13 @@ function ensureStack(location: PrLocation): void {
 function applyStack(location: PrLocation, stack: PrStack): void {
   const context = store.pr.value;
   if (!isCurrent(location) || !context) return;
+  if (stack.source === "branches" && currentStack?.source === "native") return;
   currentStack = stack;
-  store.pr.value = { ...context, stack };
+  // The current PR's title is read from the page; keep it in sync with the context.
+  const pulls = stack.pulls.map((pull) =>
+    pull.number === context.number && context.title ? { ...pull, title: context.title } : pull,
+  );
+  store.pr.value = { ...context, stack: { ...stack, pulls } };
 }
 
 function activate(location: PrLocation): void {

@@ -22,6 +22,7 @@ import {
   defaultThreadTitle,
   missingRequirements,
   renderTemplate,
+  templateBody,
   usesStackReview,
 } from "@shared/templates/render";
 
@@ -104,7 +105,7 @@ export const renderedPrompt = computed(() => {
   const template = intent.value;
   const context = pr.value;
   if (!template || !context) return "";
-  return renderTemplate(template.body, {
+  return renderTemplate(templateBody(template), {
     pr: { ...context, ...(composerComment.value ? { comment: composerComment.value } : {}) },
     note: composerNote.value,
     reviewOutput: composerReviewOutput.value,
@@ -121,7 +122,7 @@ export const reviewsStack = computed(() => {
     !!template &&
     !!context &&
     composerReviewStack.value &&
-    usesStackReview(template.body) &&
+    usesStackReview(template) &&
     !!stackTopBranch(context)
   );
 });
@@ -537,7 +538,7 @@ export function quickDispatch(intentId: string, options: { detailPrefix?: string
     openComposer({ intentId });
     return;
   }
-  const text = renderTemplate(template.body, {
+  const text = renderTemplate(templateBody(template), {
     pr: context,
     note: "",
     reviewOutput: composerReviewOutput.value,

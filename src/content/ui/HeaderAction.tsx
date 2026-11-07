@@ -1,4 +1,5 @@
 import { intentReason } from "@shared/intent";
+import type { PromptTemplate } from "@shared/models";
 import { stackReviewEntries } from "@shared/stack";
 import { usesStackReview } from "@shared/templates/render";
 import { useEffect, useRef, useState } from "preact/hooks";
@@ -73,9 +74,9 @@ export function HeaderAction({ onJumpToSessions }: { onJumpToSessions: () => voi
   const reason = suggested ? intentReason(context, suggested) : undefined;
   // Actions with `{{review.stack}}` cover the whole stack unless the composer switch is off.
   const stackSize = store.composerReviewStack.value ? stackReviewEntries(context)?.length : undefined;
-  const stackHint = (body: string) =>
-    stackSize && usesStackReview(body) ? `ganzer Stack · ${stackSize} PRs` : undefined;
-  const suggestedStack = suggested ? stackHint(suggested.body) : undefined;
+  const stackHint = (template: PromptTemplate) =>
+    stackSize && usesStackReview(template) ? `ganzer Stack · ${stackSize} PRs` : undefined;
+  const suggestedStack = suggested ? stackHint(suggested) : undefined;
   const why = [reason, suggestedStack].filter(Boolean).join(", ");
 
   return (
@@ -106,7 +107,7 @@ export function HeaderAction({ onJumpToSessions }: { onJumpToSessions: () => voi
         <div class="t3-menu" role="menu" hidden={!open}>
           {store.templates.value.map((template) => {
             const why = intentReason(context, template);
-            const stack = stackHint(template.body);
+            const stack = stackHint(template);
             return (
               <button
                 type="button"

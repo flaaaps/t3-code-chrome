@@ -249,7 +249,7 @@ function StackField() {
   const template = store.intent.value;
   const context = store.pr.value;
   const entries = context ? stackReviewEntries(context) : undefined;
-  if (!template || !entries || !usesStackReview(template.body)) return null;
+  if (!template || !entries || !usesStackReview(template)) return null;
   return (
     <div class="t3-field">
       <div class="label">

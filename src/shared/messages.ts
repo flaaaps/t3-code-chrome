@@ -46,12 +46,14 @@ const prContextSchema = prKeySchema.extend({
   comment: commentSchema.optional(),
   stack: z
     .object({
+      source: z.enum(["native", "branches"]),
       baseBranch: z.string().optional(),
       pulls: z.array(
         z.object({
           number: z.number().int().positive(),
           title: z.string(),
           headBranch: z.string().optional(),
+          baseBranch: z.string().optional(),
           state: z.enum(["open", "merged", "closed"]),
         }),
       ),
