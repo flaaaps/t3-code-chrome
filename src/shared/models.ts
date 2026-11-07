@@ -169,6 +169,22 @@ export interface CommentContext {
   text: string;
 }
 
+/** A PR in a native GitHub stack (same repository as the PR it was read from). */
+export interface PrStackEntry {
+  number: number;
+  title: string;
+  headBranch?: string;
+  state: "open" | "merged" | "closed";
+}
+
+/** The native GitHub stack a PR belongs to. */
+export interface PrStack {
+  /** Branch the bottom PR merges into. */
+  baseBranch?: string;
+  /** Every PR in the stack, bottom (merges into `baseBranch`) first. */
+  pulls: PrStackEntry[];
+}
+
 export interface PrContext extends PrKey {
   url: string;
   title: string;
@@ -184,6 +200,7 @@ export interface PrContext extends PrKey {
   failedChecks?: string[];
   changedFilesCount?: number;
   comment?: CommentContext;
+  stack?: PrStack;
 }
 
 export interface TargetNew {

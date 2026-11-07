@@ -20,6 +20,8 @@ export const BUILTIN_TEMPLATES: PromptTemplate[] = [
 
 Führe dann ein gründliches Code-Review für den Pull Request {{pr.url}} durch („{{pr.title}}“, Branch {{pr.headBranch}} → {{pr.baseBranch}}).
 
+{{review.stack}}
+
 Vorgehen:
 1. Hole Diff, Beschreibung, bestehende Review-Kommentare und den Status der Checks (z. B. \`gh pr view\`, \`gh pr diff\`, \`gh api\`).
 2. Prüfe Korrektheit, Randfälle, Sicherheit, Performance und Testabdeckung. Verifiziere Behauptungen im Code, nicht nur im Diff.

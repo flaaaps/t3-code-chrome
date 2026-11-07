@@ -1,7 +1,8 @@
 import { sendRequest } from "@shared/client";
 import { isActiveStatus, type RuntimeMode, type ThreadSummary } from "@shared/models";
 import { rankThreads } from "@shared/sort";
-import { defaultThreadTitle } from "@shared/templates/render";
+import { stackReviewEntries } from "@shared/stack";
+import { defaultThreadTitle, usesStackReview } from "@shared/templates/render";
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { Alert, Icon, relativeTime, Spinner, StatusChip } from "./components";
 import type { TargetChoice } from "./store";
@@ -213,6 +214,8 @@ export function Composer({ returnFocusTo }: { returnFocusTo: () => void }) {
                 </div>
               ) : null}
 
+              <StackField />
+
               <Advanced />
 
               {store.composerError.value ? <Alert kind="error">{store.composerError.value}</Alert> : null}
@@ -237,6 +240,39 @@ export function Composer({ returnFocusTo }: { returnFocusTo: () => void }) {
           </>
         )}
       </section>
+    </div>
+  );
+}
+
+/** "Ganzen Stack reviewen" for actions whose template uses `{{review.stack}}`. */
+function StackField() {
+  const template = store.intent.value;
+  const context = store.pr.value;
+  const entries = context ? stackReviewEntries(context) : undefined;
+  if (!template || !entries || !usesStackReview(template.body)) return null;
+  return (
+    <div class="t3-field">
+      <div class="label">
+        Stack <span class="hint">{entries.length} offene PRs, von unten nach oben</span>
+      </div>
+      <div class="t3-radio">
+        <label>
+          <input
+            type="checkbox"
+            checked={store.composerReviewStack.value}
+            onChange={(event) => {
+              store.composerReviewStack.value = (event.target as HTMLInputElement).checked;
+            }}
+          />
+          Ganzen Stack reviewen:{" "}
+          {entries.map((entry, index) => (
+            <span key={entry.number}>
+              {index > 0 ? " → " : ""}
+              {entry.current ? <strong>#{entry.number}</strong> : `#${entry.number}`}
+            </span>
+          ))}
+        </label>
+      </div>
     </div>
   );
 }
@@ -346,7 +382,7 @@ function TargetField() {
             projectTitle: project.title,
             workspace: "worktree",
           },
-          label: `${project.title} · Worktree ${context.headBranch}`,
+          label: `${project.title} · Worktree ${store.worktreeBranch(context)}`,
           meta: data.defaults.modelLabel ?? "",
         });
       }

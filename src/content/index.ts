@@ -1,4 +1,5 @@
 import { type ExtensionEvent, sendRequest } from "@shared/client";
+import type { PrContext, PrStack } from "@shared/models";
 import type { PrLocation, RepoKey } from "@shared/prKey";
 import { matchesShortcut, parseShortcut } from "@shared/shortcut";
 import { h, render } from "preact";
@@ -15,6 +16,7 @@ import {
 import { commentFromSelection, describeComment, readPrContext } from "./github/prContext";
 import { watchLocation } from "./github/prDetector";
 import { findPullsAnchor, readViewer } from "./github/pullsPage";
+import { fetchStack, hasStackBadge, stackFromPage } from "./github/stack";
 import { AgentBox } from "./ui/AgentBox";
 import { CommentMenu } from "./ui/CommentMenu";
 import { Composer } from "./ui/Composer";
@@ -33,6 +35,9 @@ const COMMENT_CLASS = "t3-code-chrome-comment";
 const PULLS_ID = "t3-code-chrome-pulls";
 
 let currentPr: PrLocation | undefined;
+let currentStack: PrStack | undefined;
+/** Reading the stack: the page's embedded data first, then a fetch once GitHub's stack badge shows. */
+let stackPhase: "page" | "badge" | "done" = "page";
 let currentPulls: RepoKey | undefined;
 let pullsActivation = 0;
 let observer: MutationObserver | undefined;
@@ -203,6 +208,7 @@ async function activatePulls(repo: RepoKey): Promise<void> {
 
 function mountAll(): void {
   if (currentPr) {
+    ensureStack(currentPr);
     mountOverlay();
     mountHeader();
     mountAgentBox();
@@ -228,16 +234,59 @@ function scheduleMount(): void {
   }, 250);
 }
 
+function isCurrent(location: PrLocation): boolean {
+  return (
+    !!currentPr &&
+    currentPr.owner === location.owner &&
+    currentPr.repo === location.repo &&
+    currentPr.number === location.number
+  );
+}
+
+function readContext(location: PrLocation): PrContext {
+  const context = readPrContext(location);
+  if (currentStack) context.stack = currentStack;
+  return context;
+}
+
+function ensureStack(location: PrLocation): void {
+  if (stackPhase === "done") return;
+  if (stackPhase === "page") {
+    const fromPage = stackFromPage(location);
+    if (fromPage !== undefined) {
+      stackPhase = "done";
+      if (fromPage) applyStack(location, fromPage);
+      return;
+    }
+    stackPhase = "badge";
+  }
+  // Checked again on every DOM change until GitHub renders the badge; PRs without one cost no request.
+  if (!hasStackBadge()) return;
+  stackPhase = "done";
+  void fetchStack(location).then((stack) => {
+    if (stack) applyStack(location, stack);
+  });
+}
+
+function applyStack(location: PrLocation, stack: PrStack): void {
+  const context = store.pr.value;
+  if (!isCurrent(location) || !context) return;
+  currentStack = stack;
+  store.pr.value = { ...context, stack };
+}
+
 function activate(location: PrLocation): void {
   currentPr = location;
-  store.setPr(readPrContext(location));
+  currentStack = undefined;
+  stackPhase = "page";
+  store.setPr(readContext(location));
   mountAll();
   observe();
   // GitHub fills in header details lazily; re-read the context once more.
   if (rereadTimer) window.clearTimeout(rereadTimer);
   rereadTimer = window.setTimeout(() => {
-    if (currentPr && currentPr.number === location.number) {
-      const fresh = readPrContext(location);
+    if (isCurrent(location)) {
+      const fresh = readContext(location);
       const previous = store.pr.value;
       if (JSON.stringify(fresh) !== JSON.stringify(previous)) store.pr.value = fresh;
     }
@@ -246,6 +295,8 @@ function activate(location: PrLocation): void {
 
 function deactivate(): void {
   currentPr = undefined;
+  currentStack = undefined;
+  stackPhase = "page";
   currentPulls = undefined;
   pullsActivation += 1;
   pulls.deactivate();
@@ -307,12 +358,7 @@ watchLocation((page) => {
     deactivate();
     return;
   }
-  if (
-    currentPr &&
-    currentPr.owner === location.owner &&
-    currentPr.repo === location.repo &&
-    currentPr.number === location.number
-  ) {
+  if (isCurrent(location)) {
     currentPr = location;
     scheduleMount();
     return;
