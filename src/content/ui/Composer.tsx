@@ -742,7 +742,7 @@ function Advanced() {
           <input
             class="t3-input"
             aria-label="Titel der Session"
-            placeholder={defaultThreadTitle(context, template?.name)}
+            placeholder={defaultThreadTitle(context, template, { stack: store.reviewsStack.value })}
             value={store.composerTitle.value}
             onInput={(event) => {
               store.composerTitle.value = (event.target as HTMLInputElement).value;

@@ -114,10 +114,8 @@ export const renderedPrompt = computed(() => {
   });
 });
 
-/** Whether the selected action reviews the PR's whole stack. */
-export const reviewsStack = computed(() => {
-  const template = intent.value;
-  const context = pr.value;
+/** Whether running `template` on the PR reviews its whole stack. */
+export function coversStack(template: PromptTemplate | undefined, context: PrContext | undefined): boolean {
   return (
     !!template &&
     !!context &&
@@ -125,7 +123,10 @@ export const reviewsStack = computed(() => {
     usesStackReview(template) &&
     !!stackTopBranch(context)
   );
-});
+}
+
+/** Whether the selected action reviews the PR's whole stack. */
+export const reviewsStack = computed(() => coversStack(intent.value, pr.value));
 
 /** The branch a new worktree starts from: the top of the stack when the whole stack is reviewed. */
 export function worktreeBranch(context: PrContext): string | undefined {
@@ -463,7 +464,7 @@ async function dispatch(
     pr: prKey(context),
     title:
       target.kind === "new"
-        ? defaultThreadTitle(context, template.name)
+        ? defaultThreadTitle(context, template, { stack: coversStack(template, context) })
         : (sessions.value.find((s) => s.threadId === target.threadId)?.title ?? "Session"),
     intentName: template.name,
     status: "preparing",
@@ -481,7 +482,9 @@ async function dispatch(
       prompt: text,
       intentId: template.id,
       intentName: template.name,
-      ...(target.kind === "new" ? { title: defaultThreadTitle(context, template.name) } : {}),
+      ...(target.kind === "new"
+        ? { title: defaultThreadTitle(context, template, { stack: coversStack(template, context) }) }
+        : {}),
       clientRequestId: crypto.randomUUID(),
     });
     sessions.value = [

@@ -98,10 +98,35 @@ describe("missingRequirements", () => {
 });
 
 describe("defaultThreadTitle", () => {
-  it("prefixes the template name and truncates", () => {
-    expect(defaultThreadTitle(pr, "Review")).toBe("Review: studypilot/monorepo#1103 Forced logout UX");
-    const long = defaultThreadTitle({ ...pr, title: "x".repeat(200) });
-    expect(long.length).toBeLessThanOrEqual(120);
+  const byId = (id: string) => {
+    const template = BUILTIN_TEMPLATES.find((t) => t.id === id);
+    if (!template) throw new Error(`missing ${id}`);
+    return template;
+  };
+
+  it("puts a short action prefix before the PR title", () => {
+    expect(defaultThreadTitle(pr, byId("builtin:review"))).toBe("Review: Forced logout UX");
+    expect(defaultThreadTitle(pr, byId("builtin:address-review"))).toBe("Kommentare: Forced logout UX");
+    expect(defaultThreadTitle(pr, byId("builtin:summarize"))).toBe("Zusammenfassung: Forced logout UX");
+    expect(defaultThreadTitle(pr, byId("builtin:review"), { stack: true })).toBe(
+      "Stack-Review: Forced logout UX",
+    );
+    // The stack only changes review actions; custom actions use their name.
+    expect(defaultThreadTitle(pr, byId("builtin:fix-ci"), { stack: true })).toBe(
+      "CI fixen: Forced logout UX",
+    );
+    expect(defaultThreadTitle(pr, { id: "custom:x", name: "Sicherheitscheck" })).toBe(
+      "Sicherheitscheck: Forced logout UX",
+    );
+    expect(defaultThreadTitle(pr)).toBe("Forced logout UX");
+  });
+
+  it("falls back to the PR number and truncates", () => {
+    expect(defaultThreadTitle({ ...pr, title: "  " }, byId("builtin:review"))).toBe(
+      "Review: Pull Request #1103",
+    );
+    const long = defaultThreadTitle({ ...pr, title: "x".repeat(200) }, byId("builtin:review"));
+    expect(long).toHaveLength(120);
     expect(long.endsWith("…")).toBe(true);
   });
 });
