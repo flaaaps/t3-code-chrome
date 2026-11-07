@@ -1,7 +1,20 @@
 import { isActiveStatus, RUNNING_THREAD_STATUSES, type SendMode, type Session } from "@shared/models";
+import { threadTitlePrefix } from "@shared/templates/render";
 import { useState } from "preact/hooks";
 import { Icon, relativeTime, StatusDot, statusLabel, statusTone } from "./components";
 import * as store from "./store";
+
+/** "Review durchführen · " before titles that do not already say which action started them. */
+function intentPrefix(session: Session): string {
+  const name = session.intentName;
+  if (!name) return "";
+  const template = store.templates.value.find((t) => t.name === name);
+  const prefixes = [
+    name,
+    ...(template ? [threadTitlePrefix(template), threadTitlePrefix(template, { stack: true })] : []),
+  ];
+  return prefixes.some((prefix) => session.title.startsWith(prefix)) ? "" : `${name} · `;
+}
 
 /** Inline strip under the PR header listing every session that works on this PR. */
 export function AgentBox() {
@@ -104,9 +117,7 @@ function SessionCard({ session }: { session: Session }) {
       </div>
       <div class="head">
         <span class="title" title={session.title}>
-          {session.intentName && !session.title.startsWith(session.intentName)
-            ? `${session.intentName} · `
-            : ""}
+          {intentPrefix(session)}
           {session.title}
         </span>
         <span class="meta">

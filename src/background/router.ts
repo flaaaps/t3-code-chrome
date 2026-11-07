@@ -189,7 +189,11 @@ export function createHandlers({ connections, catalog, sessions }: RouterDeps): 
       let status: Job["status"] = "queued";
 
       if (target.kind === "new") {
-        threadTitle = (title ?? target.title ?? defaultThreadTitle(pr, intentName)).trim();
+        threadTitle = (
+          title ??
+          target.title ??
+          defaultThreadTitle(pr, intentName ? { id: intentId ?? "", name: intentName } : undefined)
+        ).trim();
         if (!target.scratch && !target.projectId) {
           throw new ExtensionError("invalid_input", "Bitte ein Projekt wählen oder ohne Projekt starten.");
         }

@@ -148,7 +148,10 @@ describe("discoverBranchStack", () => {
       const [, field, branch] = /is:open (head|base):(\S+)/.exec(query) ?? [];
       return prs
         .filter((pr) => (field === "head" ? pr.head : pr.base) === branch)
-        .map((pr) => ({ ...context(pr.number), isDraft: false, labels: [], roles: [] }));
+        .map(({ number }) => {
+          const { host, owner, repo, url, title } = context(number);
+          return { host, owner, repo, number, url, title, isDraft: false, labels: [], roles: [] };
+        });
     },
     facts: async (key) => {
       const pr = prs.find((p) => p.number === key.number);

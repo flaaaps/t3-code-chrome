@@ -112,7 +112,7 @@ export function listPlaceholders(body: string): string[] {
 
 type StackTemplate = Pick<PromptTemplate, "id" | "body" | "reviewOutput">;
 
-const isReview = (template: StackTemplate) =>
+const isReview = (template: Pick<PromptTemplate, "id" | "reviewOutput">) =>
   template.reviewOutput === true || template.id === "builtin:review";
 
 /** Whether a template offers the whole-stack review: it uses `{{review.stack}}` or is a review action. */
@@ -145,13 +145,34 @@ export function missingRequirements(
   return missing;
 }
 
-export function defaultThreadTitle(
-  pr: { number: number; title: string; owner: string; repo: string },
-  templateName?: string,
+/** Short thread-title prefixes of the built-in actions; other actions use their name. */
+const TITLE_PREFIXES: Record<string, string> = {
+  "builtin:review": "Review",
+  "builtin:address-review": "Kommentare",
+  "builtin:fix-ci": "CI fixen",
+  "builtin:reply-comment": "Kommentar",
+  "builtin:summarize": "Zusammenfassung",
+  "builtin:free": "Aufgabe",
+};
+
+/** The prefix a new thread's title gets for an action ("Review", "Stack-Review", "Kommentare"…). */
+export function threadTitlePrefix(
+  template: Pick<PromptTemplate, "id" | "name" | "reviewOutput">,
+  options: { stack?: boolean } = {},
 ): string {
-  const prefix = templateName ? `${templateName}: ` : "";
-  const title = `${prefix}${pr.owner}/${pr.repo}#${pr.number} ${pr.title}`.trim();
-  return title.length > 120 ? `${title.slice(0, 117)}…` : title;
+  if (options.stack && isReview(template)) return "Stack-Review";
+  return TITLE_PREFIXES[template.id] ?? template.name;
+}
+
+/** "<prefix>: <PR title>", e.g. "Review: Forced logout UX"; at most 120 characters. */
+export function defaultThreadTitle(
+  pr: { number: number; title: string },
+  template?: Pick<PromptTemplate, "id" | "name" | "reviewOutput">,
+  options: { stack?: boolean } = {},
+): string {
+  const name = pr.title.replace(/\s+/g, " ").trim() || `Pull Request #${pr.number}`;
+  const title = template ? `${threadTitlePrefix(template, options)}: ${name}` : name;
+  return title.length > 120 ? `${title.slice(0, 119)}…` : title;
 }
 
 export const SAMPLE_PR: PrContext = {

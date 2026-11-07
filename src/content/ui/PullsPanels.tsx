@@ -1,4 +1,4 @@
-import { isActiveStatus } from "@shared/models";
+import { isActiveStatus, type PromptTemplate } from "@shared/models";
 import { prKeyToString, pullsPath } from "@shared/prKey";
 import {
   groupStacks,
@@ -9,6 +9,7 @@ import {
   primaryActionFor,
   sortPanelEntries,
 } from "@shared/pulls";
+import { usesStackReview } from "@shared/templates/render";
 import { useEffect, useRef, useState } from "preact/hooks";
 import { Alert, Icon, relativeTime, Spinner, StatusChip, statusLabel } from "./components";
 import * as pulls from "./pullsStore";
@@ -223,18 +224,26 @@ function LabelChip({ name, color }: { name: string; color?: string | undefined }
 /** A single PR, or the bottom of a stack with a toggle for the PRs built on top of it. */
 function StackRows({ entry, panel }: { entry: PanelEntry; panel: PanelId }) {
   const key = prKeyToString(entry.root);
-  if (entry.stacked.length === 0) return <PrRow item={entry.root} panel={panel} />;
+  if (entry.stacked.length === 0)
+    return <PrRow item={entry.root} panel={panel} inStack={!!entry.root.stack} />;
   const expanded = pulls.expandedStacks.value.has(key);
   return (
     <>
       <PrRow
         item={entry.root}
         panel={panel}
+        inStack
         stack={{ entry, expanded, onToggle: () => pulls.toggleStack(key) }}
       />
       {expanded
         ? entry.stacked.map(({ item, depth, parent }) => (
-            <PrRow key={prKeyToString(item)} item={item} panel={panel} stackedOn={{ depth, parent }} />
+            <PrRow
+              key={prKeyToString(item)}
+              item={item}
+              panel={panel}
+              inStack
+              stackedOn={{ depth, parent }}
+            />
           ))
         : null}
     </>
@@ -273,11 +282,14 @@ function StackToggle({
 function PrRow({
   item,
   panel,
+  inStack = false,
   stack,
   stackedOn,
 }: {
   item: PrListItem;
   panel: PanelId;
+  /** Part of a stack the list knows of (native, or grouped by branches). */
+  inStack?: boolean;
   stack?: { entry: PanelEntry; expanded: boolean; onToggle: () => void };
   stackedOn?: { depth: number; parent: number };
 }) {
@@ -301,6 +313,14 @@ function PrRow({
         <span class="line2">
           {stack ? <StackToggle {...stack} /> : null}
           {stackedOn ? <span class="t3-stacked-on">baut auf #{stackedOn.parent} auf</span> : null}
+          {!stack && !stackedOn && item.stack ? (
+            <span
+              class="t3-badge"
+              title={`Teil eines GitHub-Stacks, Position ${item.stack.position} von ${item.stack.size} (von unten)`}
+            >
+              Stack {item.stack.position}/{item.stack.size}
+            </span>
+          ) : null}
           <span>#{item.number}</span>
           {item.author ? (
             <span>{item.author.toLowerCase() === viewer?.toLowerCase() ? "von dir" : item.author}</span>
@@ -316,12 +336,12 @@ function PrRow({
           <SessionSummary item={item} />
         </span>
       </span>
-      <RowActions item={item} panel={panel} />
+      <RowActions item={item} panel={panel} inStack={inStack} />
     </li>
   );
 }
 
-function RowActions({ item, panel }: { item: PrListItem; panel: PanelId }) {
+function RowActions({ item, panel, inStack }: { item: PrListItem; panel: PanelId; inStack: boolean }) {
   const [open, setOpen] = useState(false);
   const wrap = useRef<HTMLDivElement>(null);
   const toggle = useRef<HTMLButtonElement>(null);
@@ -335,6 +355,9 @@ function RowActions({ item, panel }: { item: PrListItem; panel: PanelId }) {
   const usable = link === "ready" || link === "unknown";
   const suggestedId = action.kind === "intent" ? action.template.id : undefined;
   const defaultIntentId = suggestedId ?? (panel === "mine" ? "builtin:summarize" : "builtin:review");
+  // A review of a PR the list knows to be stacked covers the whole stack (looked up on click).
+  const coversStack = (template: PromptTemplate) =>
+    inStack && store.composerReviewStack.value && usesStackReview(template);
 
   useEffect(() => {
     if (!open) return;
@@ -380,7 +403,7 @@ function RowActions({ item, panel }: { item: PrListItem; panel: PanelId }) {
       ? `${action.session.title} in T3 Code öffnen`
       : blocked && !busy
         ? "Warte auf den laufenden Start"
-        : `${action.label} für #${item.number}`;
+        : `${action.label} für #${item.number}${coversStack(action.template) ? " (ganzer Stack)" : ""}`;
 
   return (
     <div class="t3-menu-wrap t3-prrow-actions" ref={wrap}>
@@ -456,6 +479,7 @@ function RowActions({ item, panel }: { item: PrListItem; panel: PanelId }) {
               >
                 <span class="label">{template.actionLabel ?? template.name}</span>
                 {template.id === suggestedId ? <span class="hint">Standard</span> : null}
+                {coversStack(template) ? <span class="hint">ganzer Stack</span> : null}
               </button>
             ))}
             <div class="t3-menu-sep" />

@@ -4,8 +4,8 @@
  */
 import { computed, signal } from "@preact/signals";
 import { errorCode, openLivePort, sendRequest } from "@shared/client";
-import { isActiveStatus, type LinkState, type Session } from "@shared/models";
-import { type PrKey, prKeyToString, type RepoKey, repoKeyEquals } from "@shared/prKey";
+import { isActiveStatus, type LinkState, type PrStack, type Session } from "@shared/models";
+import { type PrKey, prKeyEquals, prKeyToString, type RepoKey, repoKeyEquals } from "@shared/prKey";
 import {
   type PanelAssignment,
   type PanelId,
@@ -13,7 +13,9 @@ import {
   type PrPageFacts,
   prListItemToContext,
 } from "@shared/pulls";
+import { usesStackReview } from "@shared/templates/render";
 import { clearPullsCache, loadBranches, loadPanels, loadPrFacts } from "../github/pullsPage";
+import { branchStack, fetchStack } from "../github/stack";
 import * as store from "./store";
 
 export type PanelsStatus = "idle" | "loading" | "ready" | "error";
@@ -221,16 +223,40 @@ export function setCollapsed(value: boolean): void {
 // --- row actions ------------------------------------------------------------------------------
 
 /**
- * Turn a list row into the active PR: read its branch from the PR page, then let the PR store load
- * projects and sessions. Returns false when T3 is not usable (the composer then explains why).
+ * The stack a list row belongs to: a native GitHub stack (the list marks it) from the PR page,
+ * otherwise PRs chained by branches.
  */
-async function prepare(item: PrListItem): Promise<boolean> {
+async function stackFor(item: PrListItem, title: string): Promise<PrStack | undefined> {
+  if (item.stack) {
+    const native = await fetchStack(item);
+    if (native) return native;
+  }
+  return branchStack({ host: item.host, owner: item.owner, repo: item.repo, number: item.number, title });
+}
+
+/**
+ * Turn a list row into the active PR: read its branch from the PR page, then let the PR store load
+ * projects and sessions. The stack is looked up alongside; with `awaitStack` the PR becomes active
+ * with it (a one-click stack review needs it), otherwise it is added when it arrives. Returns false
+ * when T3 is not usable (the composer then explains why).
+ */
+async function prepare(item: PrListItem, awaitStack: boolean): Promise<boolean> {
   const key = prKeyToString(item);
   busyKey.value = key;
   try {
     const facts = await loadPrFacts(item);
     const context = prListItemToContext(item, viewer.value, facts);
-    const ready = await store.activateContext(context);
+    const stackLookup = stackFor(item, context.title);
+    const addStack = (stack: PrStack | undefined) => {
+      const current = store.pr.value;
+      if (stack && current && prKeyEquals(current, item)) store.pr.value = { ...current, stack };
+    };
+    if (!awaitStack) void stackLookup.then(addStack);
+    const [ready, stack] = await Promise.all([
+      store.activateContext(context),
+      awaitStack ? stackLookup : Promise.resolve(undefined),
+    ]);
+    addStack(stack);
     // Seed the PR store with what the list already knows, so the composer offers the right sessions.
     if (ready) store.sessions.value = mergeSessions(store.sessions.value, sessionsFor(item));
     return ready;
@@ -246,7 +272,9 @@ function mergeSessions(primary: Session[], extra: Session[]): Session[] {
 
 export async function runIntent(item: PrListItem, intentId: string): Promise<void> {
   if (busyKey.value || countdownActive.value) return;
-  const ready = await prepare(item);
+  const template = store.templates.value.find((t) => t.id === intentId);
+  const reviewsStack = !!template && usesStackReview(template) && store.composerReviewStack.value;
+  const ready = await prepare(item, reviewsStack);
   if (!ready) {
     store.openComposer({ intentId });
     return;
@@ -256,7 +284,7 @@ export async function runIntent(item: PrListItem, intentId: string): Promise<voi
 
 export async function openComposerFor(item: PrListItem, intentId: string): Promise<void> {
   if (busyKey.value) return;
-  await prepare(item);
+  await prepare(item, false);
   store.openComposer({ intentId });
 }
 
