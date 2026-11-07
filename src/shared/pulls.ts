@@ -23,6 +23,8 @@ export interface PrListItem extends PrKey {
   createdAt?: string;
   updatedAt?: string;
   commentCount?: number;
+  /** Place in a native GitHub stack (position counts from the bottom, 1-based). */
+  stack?: { position: number; size: number };
   /** Why the PR is in a panel; filled by `assignPanels`. */
   roles: PrListRole[];
 }
@@ -132,6 +134,9 @@ function parseListEntry(entry: unknown, repo: RepoKey): PrListItem | undefined {
   if (login) item.author = login;
   const createdAt = str(raw.createdAt);
   if (createdAt) item.createdAt = createdAt;
+  const stackSize = num(raw.stackSize);
+  const stackPosition = num(raw.stackPosition);
+  if (stackSize && stackSize > 1 && stackPosition) item.stack = { position: stackPosition, size: stackSize };
   const updatedAt = str(raw.updatedAt);
   if (updatedAt) item.updatedAt = updatedAt;
   const commentCount = num(raw.commentCount);

@@ -102,6 +102,21 @@ describe("parsePullsEmbedded", () => {
     expect(extractEmbeddedData(html)).toHaveLength(1);
     expect(parsePullsEmbedded(html, repo)?.results.map((r) => r.number)).toEqual([4]);
   });
+
+  it("reads a PR's place in a native stack (fields as on github.com, November 2026)", () => {
+    const entry = (number: number, stackPosition: number | null, stackSize: number | null) =>
+      JSON.stringify({
+        number,
+        title: `PR ${number}`,
+        state: "REPO_PULL_REQUEST_STATE_OPEN",
+        stackPosition,
+        stackSize,
+      });
+    const html = `<script type="application/json" data-target="react-app.embeddedData">{"payload":{"repoPullsDashboardContentRoute":{"currentPage":1,"totalPages":1,"results":[${entry(1194, 2, 2)},${entry(1195, null, null)}]}}}</script>`;
+    const [stacked, single] = parsePullsEmbedded(html, repo)?.results ?? [];
+    expect(stacked?.stack).toEqual({ position: 2, size: 2 });
+    expect(single?.stack).toBeUndefined();
+  });
 });
 
 describe("parsePrPageEmbedded", () => {
