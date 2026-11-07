@@ -3,6 +3,8 @@ import type { PrLocation, RepoKey } from "@shared/prKey";
 import { matchesShortcut, parseShortcut } from "@shared/shortcut";
 import { h, render } from "preact";
 import {
+  type Anchor,
+  commentMenuSlot,
   findAgentBoxAnchor,
   findCommentActionContainers,
   findCommentRoot,
@@ -17,6 +19,7 @@ import { AgentBox } from "./ui/AgentBox";
 import { CommentMenu } from "./ui/CommentMenu";
 import { Composer } from "./ui/Composer";
 import { HeaderAction } from "./ui/HeaderAction";
+import { isolateKeyboard } from "./ui/keyboard";
 import { PullsPanels } from "./ui/PullsPanels";
 import * as pulls from "./ui/pullsStore";
 import * as store from "./ui/store";
@@ -50,6 +53,7 @@ function makeHost(id: string, tag: "div" | "span" = "div"): Host {
   shadow.appendChild(style);
   const root = document.createElement(tag === "span" ? "span" : "div");
   shadow.appendChild(root);
+  isolateKeyboard(element);
   return { element, root };
 }
 
@@ -97,7 +101,8 @@ function mountHeader(): void {
   header.element.style.verticalAlign = "middle";
   const actions = findHeaderActions();
   if (actions) {
-    header.element.style.marginLeft = "8px";
+    // The new PR experience's action row spaces its children with `gap`.
+    if (getComputedStyle(actions).columnGap === "normal") header.element.style.marginLeft = "8px";
     actions.appendChild(header.element);
   } else {
     // Logged-out or unexpected layout: a right-aligned row under the PR header instead of a floating button.
@@ -105,8 +110,7 @@ function mountHeader(): void {
     header.element.style.display = "flex";
     header.element.style.justifyContent = "flex-end";
     header.element.style.margin = "8px 0";
-    if (anchor?.position === "after") anchor.node.insertAdjacentElement("afterend", header.element);
-    else if (anchor) anchor.node.insertAdjacentElement("beforebegin", header.element);
+    if (anchor) insertAt(anchor, header.element);
     else findTitleRow()?.insertAdjacentElement("afterend", header.element);
   }
   render(h(HeaderAction, { onJumpToSessions: jumpToSessions }), header.root);
@@ -123,9 +127,18 @@ function mountAgentBox(): void {
   if (!anchor) return;
   agentBox = makeHost(AGENTBOX_ID);
   agentBox.element.style.display = "block";
-  if (anchor.position === "after") anchor.node.insertAdjacentElement("afterend", agentBox.element);
-  else anchor.node.insertAdjacentElement("beforebegin", agentBox.element);
+  if (anchor.position === "append") {
+    // Inside the new PR experience's page header: same width as the content, gap below the tabs.
+    agentBox.element.style.maxWidth = "1356px";
+    agentBox.element.style.margin = "16px auto 0";
+  }
+  insertAt(anchor, agentBox.element);
   render(h(AgentBox, null), agentBox.root);
+}
+
+function insertAt(anchor: Anchor, element: HTMLElement): void {
+  if (anchor.position === "append") anchor.node.appendChild(element);
+  else anchor.node.insertAdjacentElement(anchor.position === "after" ? "afterend" : "beforebegin", element);
 }
 
 // --- comment menus ---------------------------------------------------------------------
@@ -140,7 +153,8 @@ function mountCommentMenus(): void {
     host.element.removeAttribute("id");
     host.element.style.display = "inline-flex";
     host.element.style.position = "relative";
-    container.insertBefore(host.element, container.firstChild);
+    const slot = commentMenuSlot(container);
+    slot.parent.insertBefore(host.element, slot.before);
     render(h(CommentMenu, { read: () => describeComment(root) }), host.root);
   }
 }

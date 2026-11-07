@@ -26,6 +26,10 @@ function stripOwnerPrefix(value?: string | null): string | undefined {
 
 function branchFromRefs(): { head?: string; base?: string } {
   const result: { head?: string; base?: string } = {};
+  // New PR experience: `base ← head` in the header summary.
+  const reactBase = text("[class*='baseBranchGroup'] a[class*='BranchName']");
+  const reactHead = text("[class*='headBranchGroup'] a[class*='BranchName']");
+  if (reactBase && reactHead) return { base: reactBase, head: reactHead };
   const refs = [...document.querySelectorAll<HTMLElement>(".commit-ref, .head-ref, .base-ref")].filter(
     (node) => !isOwn(node),
   );
@@ -62,6 +66,12 @@ function checks(): { state: PrContext["checksState"]; failed: string[] } {
   ]
     .filter((node) => !isOwn(node))
     .map((node) => node.textContent?.replace(/\s+/g, " ").trim() ?? "");
+  // New PR experience: the "Checks" tile above the description, e.g. "4/4 3 successful checks".
+  for (const tile of document.querySelectorAll<HTMLElement>(
+    "[data-testid='mini-status'][aria-label*='checks' i]",
+  )) {
+    if (!isOwn(tile)) headings.push(tile.textContent?.replace(/\s+/g, " ").trim() ?? "");
+  }
   const joined = headings.join(" | ").toLowerCase();
   for (const item of document.querySelectorAll<HTMLElement>(
     ".merge-status-item.status-fail, .merge-status-list .merge-status-item:has(.octicon-x), [data-testid='checks-list'] li:has([aria-label*='fail' i])",
@@ -77,10 +87,10 @@ function checks(): { state: PrContext["checksState"]; failed: string[] } {
     failed.length > 0
   ) {
     state = "failure";
-  } else if (/all checks have passed|checks passed|erfolgreich/i.test(joined)) {
-    state = "success";
-  } else if (/in progress|pending|queued|waiting for/i.test(joined)) {
+  } else if (/in progress|pending|queued|waiting for|expected/i.test(joined)) {
     state = "pending";
+  } else if (/all checks have passed|checks passed|successful check|erfolgreich/i.test(joined)) {
+    state = "success";
   }
   return { state, failed };
 }
@@ -89,7 +99,7 @@ function checks(): { state: PrContext["checksState"]; failed: string[] } {
 export function readPrContext(location: PrLocation): PrContext {
   const titleNode = [
     ...document.querySelectorAll<HTMLElement>(
-      ".js-issue-title, [data-testid='issue-title'], bdi.js-issue-title, h1 bdi",
+      ".js-issue-title, [data-testid='issue-title'], bdi.js-issue-title, h1 bdi, header[class*='prc-PageLayout-Header'] h1 .markdown-title",
     ),
   ].find((node) => !isOwn(node));
   const title =
@@ -102,11 +112,12 @@ export function readPrContext(location: PrLocation): PrContext {
   const author =
     text(".gh-header-meta .author") ??
     text('[data-testid="pr-header-meta"] a[data-hovercard-type="user"]') ??
+    text("[class*='prc-PageHeader-Description'] a[data-hovercard-type='user']") ??
     text(".pull-discussion-timeline .timeline-comment-header .author");
   const viewer = document.querySelector<HTMLMetaElement>("meta[name='user-login']")?.content || undefined;
   const stateNode = [
     ...document.querySelectorAll<HTMLElement>(
-      ".State, [data-testid='pr-state-badge'], [data-testid='header-state']",
+      ".State, [data-testid='pr-state-badge'], [data-testid='header-state'], header[class*='prc-PageLayout-Header'] [data-component='StateLabel']",
     ),
   ].find((node) => !isOwn(node));
   const state = stateNode?.textContent?.replace(/\s+/g, " ").trim().toLowerCase();
@@ -114,6 +125,7 @@ export function readPrContext(location: PrLocation): PrContext {
   const reviewDecision =
     text(".js-reviews-container .merge-status-item .status-heading") ??
     text("[data-testid='review-status-heading']") ??
+    text("[data-testid='mini-status'][aria-label*='approval' i] [class*='Tooltip']") ??
     [
       ...document.querySelectorAll<HTMLElement>(
         ".merge-status-item .status-heading, [data-testid='merge-box'] h3",
@@ -123,13 +135,15 @@ export function readPrContext(location: PrLocation): PrContext {
       .find((value) => /changes requested|approved|review required/i.test(value));
   const description = [
     ...document.querySelectorAll<HTMLElement>(
-      ".pull-discussion-timeline .timeline-comment .comment-body, [data-testid='issue-body'] .markdown-body, .js-issue-body .comment-body",
+      ".pull-discussion-timeline .timeline-comment .comment-body, [data-testid='issue-body'] .markdown-body, .js-issue-body .comment-body, section[aria-label='Description'] .markdown-body",
     ),
   ]
     .find((node) => !isOwn(node))
     ?.textContent?.replace(/\n{3,}/g, "\n\n")
     .trim();
-  const filesTab = text("a[href$='/files'] .Counter, [data-testid='files-tab-counter']");
+  const filesTab = text(
+    "a[href$='/files'] .Counter, [data-testid='files-tab-counter'], #prs-files-anchor-tab [class*='CounterLabel']",
+  );
   const changedFilesCount = filesTab ? Number.parseInt(filesTab.replace(/\D/g, ""), 10) : Number.NaN;
   const { state: checksState, failed } = checks();
 
@@ -158,28 +172,40 @@ export function readPrContext(location: PrLocation): PrContext {
 /** Structured description of a review comment the user acted on. */
 export function describeComment(commentRoot: Element): CommentContext {
   const body = commentRoot.querySelector<HTMLElement>(
-    ".comment-body, [data-testid='comment-body'], .js-comment-body",
+    ".comment-body, [data-testid='comment-body'], .js-comment-body, .markdown-body",
   );
   const author =
     commentRoot
-      .querySelector<HTMLElement>(".author, [data-testid='comment-author'] a, a.author")
+      .querySelector<HTMLElement>(
+        ".author, [data-testid='comment-author'] a, a.author, [data-testid='comment-header'] [data-testid='avatar-link']",
+      )
       ?.textContent?.trim() ?? undefined;
   const fileNode =
     commentRoot.closest<HTMLElement>("[data-path]") ??
     commentRoot.closest(".file")?.querySelector<HTMLElement>("[data-path]");
+  // New PR experience: a review thread shown on the overview has the file and line in its heading.
+  const threadHeading = commentRoot
+    .closest("[data-testid='review-thread']")
+    ?.closest("article")
+    ?.querySelector<HTMLElement>(":scope > div > div > h2");
   const file =
     fileNode?.getAttribute("data-path") ??
-    commentRoot.closest(".file")?.querySelector(".file-info a")?.textContent?.trim();
+    commentRoot.closest(".file")?.querySelector(".file-info a")?.textContent?.trim() ??
+    threadHeading
+      ?.querySelector("a")
+      ?.textContent?.replace(/[\u200e\u200f]/g, "")
+      .trim();
   const line =
     commentRoot
       .closest("tr")
       ?.previousElementSibling?.querySelector("[data-line-number]")
       ?.getAttribute("data-line-number") ??
     commentRoot.closest("[data-line]")?.getAttribute("data-line") ??
+    /Line\s+(\d+)/.exec(threadHeading?.textContent ?? "")?.[1] ??
     undefined;
   const permalink =
     commentRoot.querySelector<HTMLAnchorElement>(
-      "a.js-timestamp, a[href*='#discussion_r'], a[href*='#issuecomment-'], a[href*='#pullrequestreview-']",
+      "a.js-timestamp, [data-testid='comment-header'] a[href*='#'], a[href*='#discussion_r'], a[href*='#issuecomment-'], a[href*='#pullrequestreview-']",
     )?.href ?? undefined;
   const rawText = (body?.textContent ?? "").replace(/\n{3,}/g, "\n\n").trim();
   const result: CommentContext = { text: rawText.length > 2000 ? `${rawText.slice(0, 2000)}…` : rawText };
