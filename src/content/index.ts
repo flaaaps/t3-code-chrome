@@ -1,8 +1,11 @@
 import { type ExtensionEvent, sendRequest } from "@shared/client";
+import type { PrContext, PrStack } from "@shared/models";
 import type { PrLocation, RepoKey } from "@shared/prKey";
 import { matchesShortcut, parseShortcut } from "@shared/shortcut";
 import { h, render } from "preact";
 import {
+  type Anchor,
+  commentMenuSlot,
   findAgentBoxAnchor,
   findCommentActionContainers,
   findCommentRoot,
@@ -13,10 +16,12 @@ import {
 import { commentFromSelection, describeComment, readPrContext } from "./github/prContext";
 import { watchLocation } from "./github/prDetector";
 import { findPullsAnchor, readViewer } from "./github/pullsPage";
+import { branchStack, fetchStack, hasStackBadge, stackFromPage } from "./github/stack";
 import { AgentBox } from "./ui/AgentBox";
 import { CommentMenu } from "./ui/CommentMenu";
 import { Composer } from "./ui/Composer";
 import { HeaderAction } from "./ui/HeaderAction";
+import { isolateKeyboard } from "./ui/keyboard";
 import { PullsPanels } from "./ui/PullsPanels";
 import * as pulls from "./ui/pullsStore";
 import * as store from "./ui/store";
@@ -30,6 +35,9 @@ const COMMENT_CLASS = "t3-code-chrome-comment";
 const PULLS_ID = "t3-code-chrome-pulls";
 
 let currentPr: PrLocation | undefined;
+let currentStack: PrStack | undefined;
+/** Reading the stack: the page's embedded data first, then a fetch once GitHub's stack badge shows. */
+let stackPhase: "page" | "badge" | "done" = "page";
 let currentPulls: RepoKey | undefined;
 let pullsActivation = 0;
 let observer: MutationObserver | undefined;
@@ -50,6 +58,7 @@ function makeHost(id: string, tag: "div" | "span" = "div"): Host {
   shadow.appendChild(style);
   const root = document.createElement(tag === "span" ? "span" : "div");
   shadow.appendChild(root);
+  isolateKeyboard(element);
   return { element, root };
 }
 
@@ -97,7 +106,8 @@ function mountHeader(): void {
   header.element.style.verticalAlign = "middle";
   const actions = findHeaderActions();
   if (actions) {
-    header.element.style.marginLeft = "8px";
+    // The new PR experience's action row spaces its children with `gap`.
+    if (getComputedStyle(actions).columnGap === "normal") header.element.style.marginLeft = "8px";
     actions.appendChild(header.element);
   } else {
     // Logged-out or unexpected layout: a right-aligned row under the PR header instead of a floating button.
@@ -105,8 +115,7 @@ function mountHeader(): void {
     header.element.style.display = "flex";
     header.element.style.justifyContent = "flex-end";
     header.element.style.margin = "8px 0";
-    if (anchor?.position === "after") anchor.node.insertAdjacentElement("afterend", header.element);
-    else if (anchor) anchor.node.insertAdjacentElement("beforebegin", header.element);
+    if (anchor) insertAt(anchor, header.element);
     else findTitleRow()?.insertAdjacentElement("afterend", header.element);
   }
   render(h(HeaderAction, { onJumpToSessions: jumpToSessions }), header.root);
@@ -123,9 +132,18 @@ function mountAgentBox(): void {
   if (!anchor) return;
   agentBox = makeHost(AGENTBOX_ID);
   agentBox.element.style.display = "block";
-  if (anchor.position === "after") anchor.node.insertAdjacentElement("afterend", agentBox.element);
-  else anchor.node.insertAdjacentElement("beforebegin", agentBox.element);
+  if (anchor.position === "append") {
+    // Inside the new PR experience's page header: same width as the content, gap below the tabs.
+    agentBox.element.style.maxWidth = "1356px";
+    agentBox.element.style.margin = "16px auto 0";
+  }
+  insertAt(anchor, agentBox.element);
   render(h(AgentBox, null), agentBox.root);
+}
+
+function insertAt(anchor: Anchor, element: HTMLElement): void {
+  if (anchor.position === "append") anchor.node.appendChild(element);
+  else anchor.node.insertAdjacentElement(anchor.position === "after" ? "afterend" : "beforebegin", element);
 }
 
 // --- comment menus ---------------------------------------------------------------------
@@ -140,7 +158,8 @@ function mountCommentMenus(): void {
     host.element.removeAttribute("id");
     host.element.style.display = "inline-flex";
     host.element.style.position = "relative";
-    container.insertBefore(host.element, container.firstChild);
+    const slot = commentMenuSlot(container);
+    slot.parent.insertBefore(host.element, slot.before);
     render(h(CommentMenu, { read: () => describeComment(root) }), host.root);
   }
 }
@@ -189,6 +208,7 @@ async function activatePulls(repo: RepoKey): Promise<void> {
 
 function mountAll(): void {
   if (currentPr) {
+    ensureStack(currentPr);
     mountOverlay();
     mountHeader();
     mountAgentBox();
@@ -214,16 +234,79 @@ function scheduleMount(): void {
   }, 250);
 }
 
+function isCurrent(location: PrLocation): boolean {
+  return (
+    !!currentPr &&
+    currentPr.owner === location.owner &&
+    currentPr.repo === location.repo &&
+    currentPr.number === location.number
+  );
+}
+
+function readContext(location: PrLocation): PrContext {
+  const context = readPrContext(location);
+  if (currentStack) context.stack = currentStack;
+  return context;
+}
+
+/**
+ * Find the PR's stack. A native GitHub stack comes from the page's embedded data, or from a fetch
+ * of the PR page once GitHub's stack badge shows (the data is stale after a soft navigation).
+ * PRs chained by branches are looked up alongside; a native stack wins over them.
+ */
+function ensureStack(location: PrLocation): void {
+  if (stackPhase === "done") return;
+  if (stackPhase === "page") {
+    const fromPage = stackFromPage(location);
+    if (fromPage) {
+      stackPhase = "done";
+      applyStack(location, fromPage);
+      return;
+    }
+    const context = store.pr.value;
+    if (!/merged|closed/i.test(context?.state ?? "")) {
+      void branchStack({ ...location, title: context?.title ?? "" }).then((stack) => {
+        if (stack) applyStack(location, stack);
+      });
+    }
+    if (fromPage === null) {
+      stackPhase = "done";
+      return;
+    }
+    stackPhase = "badge";
+  }
+  // Checked again on every DOM change until GitHub renders the badge; PRs without one cost no request.
+  if (!hasStackBadge()) return;
+  stackPhase = "done";
+  void fetchStack(location).then((stack) => {
+    if (stack) applyStack(location, stack);
+  });
+}
+
+function applyStack(location: PrLocation, stack: PrStack): void {
+  const context = store.pr.value;
+  if (!isCurrent(location) || !context) return;
+  if (stack.source === "branches" && currentStack?.source === "native") return;
+  currentStack = stack;
+  // The current PR's title is read from the page; keep it in sync with the context.
+  const pulls = stack.pulls.map((pull) =>
+    pull.number === context.number && context.title ? { ...pull, title: context.title } : pull,
+  );
+  store.pr.value = { ...context, stack: { ...stack, pulls } };
+}
+
 function activate(location: PrLocation): void {
   currentPr = location;
-  store.setPr(readPrContext(location));
+  currentStack = undefined;
+  stackPhase = "page";
+  store.setPr(readContext(location));
   mountAll();
   observe();
   // GitHub fills in header details lazily; re-read the context once more.
   if (rereadTimer) window.clearTimeout(rereadTimer);
   rereadTimer = window.setTimeout(() => {
-    if (currentPr && currentPr.number === location.number) {
-      const fresh = readPrContext(location);
+    if (isCurrent(location)) {
+      const fresh = readContext(location);
       const previous = store.pr.value;
       if (JSON.stringify(fresh) !== JSON.stringify(previous)) store.pr.value = fresh;
     }
@@ -232,6 +315,8 @@ function activate(location: PrLocation): void {
 
 function deactivate(): void {
   currentPr = undefined;
+  currentStack = undefined;
+  stackPhase = "page";
   currentPulls = undefined;
   pullsActivation += 1;
   pulls.deactivate();
@@ -293,12 +378,7 @@ watchLocation((page) => {
     deactivate();
     return;
   }
-  if (
-    currentPr &&
-    currentPr.owner === location.owner &&
-    currentPr.repo === location.repo &&
-    currentPr.number === location.number
-  ) {
+  if (isCurrent(location)) {
     currentPr = location;
     scheduleMount();
     return;

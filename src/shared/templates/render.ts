@@ -1,10 +1,13 @@
 import type { PrContext, PromptTemplate, ReviewOutput } from "../models";
+import { stackReviewEntries } from "../stack";
 import { REVIEW_OUTPUT_TEXT } from "./builtin";
 
 export interface RenderInput {
   pr: PrContext;
   note?: string;
   reviewOutput?: ReviewOutput;
+  /** Review every open PR of the PR's stack (`{{review.stack}}`); default true. */
+  reviewStack?: boolean;
   appendContextFooter?: boolean;
 }
 
@@ -28,6 +31,7 @@ export const PLACEHOLDERS: Array<{ name: string; hint: string }> = [
   { name: "comment.url", hint: "Link zum Kommentar" },
   { name: "comment.location", hint: "„ in <Datei>:<Zeile> (<Autor>)“" },
   { name: "review.output", hint: "Inline-Kommentare oder nur Bericht" },
+  { name: "review.stack", hint: "Auftrag, den ganzen Stack zu reviewen (leer ohne Stack)" },
   { name: "user.note", hint: "Dein Text" },
 ];
 
@@ -60,8 +64,30 @@ export function templateVariables(input: RenderInput): Record<string, string> {
     "comment.author": comment?.author ?? "",
     "comment.location": locationParts.join(""),
     "review.output": REVIEW_OUTPUT_TEXT[input.reviewOutput ?? "inline"],
+    "review.stack": input.reviewStack === false ? "" : stackReviewText(pr),
     "user.note": (input.note ?? "").trim(),
   };
+}
+
+/** The stack paragraph of a review prompt; empty when the PR is not in a stack with other open PRs. */
+export function stackReviewText(pr: PrContext): string {
+  const entries = stackReviewEntries(pr);
+  if (!entries) return "";
+  const lines = entries.map((entry, index) => {
+    const branches = entry.headBranch
+      ? ` (\`${entry.headBranch}\`${entry.baseBranch ? ` → \`${entry.baseBranch}\`` : ""})`
+      : "";
+    const marker = entry.current ? " ← diese Seite" : "";
+    return `${index + 1}. #${entry.number} „${entry.title}“${branches}, ${entry.url}${marker}`;
+  });
+  return [
+    `Der Pull Request ist Teil eines Stacks. Reviewe den ganzen Stack, nicht nur #${pr.number}. Offene Pull Requests im Stack, von unten nach oben:`,
+    lines.join("\n"),
+    "Für den Stack gilt:",
+    "- Verknüpfe den Thread mit allen Pull Requests des Stacks (`link_pull_requests`).",
+    "- Prüfe jeden Pull Request gegen den darunter (`gh pr diff <Nummer>`), damit jede Änderung genau bei dem Pull Request landet, der sie einführt. Achte zusätzlich darauf, dass die Pull Requests zusammenpassen und jeder für sich mergebar bleibt.",
+    "- Ordne jedes Finding dem Pull Request zu, der die Änderung einführt, und gib die Merge-Empfehlung pro Pull Request.",
+  ].join("\n");
 }
 
 export function renderTemplate(body: string, input: RenderInput): string {
@@ -82,6 +108,28 @@ export function listPlaceholders(body: string): string[] {
     if (match[1]) names.add(match[1]);
   }
   return [...names];
+}
+
+type StackTemplate = Pick<PromptTemplate, "id" | "body" | "reviewOutput">;
+
+const isReview = (template: StackTemplate) =>
+  template.reviewOutput === true || template.id === "builtin:review";
+
+/** Whether a template offers the whole-stack review: it uses `{{review.stack}}` or is a review action. */
+export function usesStackReview(template: StackTemplate): boolean {
+  return listPlaceholders(template.body).includes("review.stack") || isReview(template);
+}
+
+/**
+ * The body to render. A review action without `{{review.stack}}` (customised before the placeholder
+ * existed) gets it before its "Vorgehen:" steps, else at the end; empty when the PR has no stack.
+ */
+export function templateBody(template: StackTemplate): string {
+  const { body } = template;
+  if (!isReview(template) || listPlaceholders(body).includes("review.stack")) return body;
+  const steps = body.search(/\n\s*\nVorgehen:/);
+  if (steps >= 0) return `${body.slice(0, steps)}\n\n{{review.stack}}${body.slice(steps)}`;
+  return `${body}\n\n{{review.stack}}`;
 }
 
 /** Which required inputs of a template are still missing. */

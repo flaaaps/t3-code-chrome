@@ -1,4 +1,7 @@
 import { intentReason } from "@shared/intent";
+import type { PromptTemplate } from "@shared/models";
+import { stackReviewEntries } from "@shared/stack";
+import { usesStackReview } from "@shared/templates/render";
 import { useEffect, useRef, useState } from "preact/hooks";
 import { Icon, Spinner } from "./components";
 import * as store from "./store";
@@ -69,6 +72,12 @@ export function HeaderAction({ onJumpToSessions }: { onJumpToSessions: () => voi
   const loading = status === "loading" || status === "idle";
   const label = suggested?.actionLabel ?? suggested?.name ?? "Review starten";
   const reason = suggested ? intentReason(context, suggested) : undefined;
+  // Actions with `{{review.stack}}` cover the whole stack unless the composer switch is off.
+  const stackSize = store.composerReviewStack.value ? stackReviewEntries(context)?.length : undefined;
+  const stackHint = (template: PromptTemplate) =>
+    stackSize && usesStackReview(template) ? `ganzer Stack · ${stackSize} PRs` : undefined;
+  const suggestedStack = suggested ? stackHint(suggested) : undefined;
+  const why = [reason, suggestedStack].filter(Boolean).join(", ");
 
   return (
     <div class="t3-header" ref={wrap}>
@@ -78,7 +87,7 @@ export function HeaderAction({ onJumpToSessions }: { onJumpToSessions: () => voi
           <button
             type="button"
             disabled={loading}
-            title={reason ? `${label} (${reason})` : `${label} mit Standardeinstellungen`}
+            title={why ? `${label} (${why})` : `${label} mit Standardeinstellungen`}
             onClick={() => suggested && store.quickDispatch(suggested.id)}
           >
             {loading ? <Spinner /> : <Icon name="play" size={12} />}
@@ -98,6 +107,7 @@ export function HeaderAction({ onJumpToSessions }: { onJumpToSessions: () => voi
         <div class="t3-menu" role="menu" hidden={!open}>
           {store.templates.value.map((template) => {
             const why = intentReason(context, template);
+            const stack = stackHint(template);
             return (
               <button
                 type="button"
@@ -112,6 +122,7 @@ export function HeaderAction({ onJumpToSessions }: { onJumpToSessions: () => voi
                 <span class="label">{template.actionLabel ?? template.name}</span>
                 {template.id === suggested?.id ? <span class="hint">Standard</span> : null}
                 {why ? <span class="hint hot">● {why}</span> : null}
+                {stack ? <span class="hint">{stack}</span> : null}
               </button>
             );
           })}

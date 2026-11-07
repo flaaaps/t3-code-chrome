@@ -7,7 +7,13 @@ import type {
   ServerConnection,
 } from "@shared/models";
 import { isGitHubHost, normaliseEnterpriseHost } from "@shared/prKey";
-import { listPlaceholders, PLACEHOLDERS, renderTemplate, SAMPLE_PR } from "@shared/templates/render";
+import {
+  listPlaceholders,
+  PLACEHOLDERS,
+  renderTemplate,
+  SAMPLE_PR,
+  templateBody,
+} from "@shared/templates/render";
 import { useEffect, useMemo, useState } from "preact/hooks";
 
 type Tab = "connections" | "actions" | "settings";
@@ -468,12 +474,12 @@ function Editor({
 }) {
   const preview = useMemo(
     () =>
-      renderTemplate(template.body, {
+      renderTemplate(templateBody(template), {
         pr: SAMPLE_PR,
         note: "Fokus auf die Mandantentrennung.",
         reviewOutput: "inline",
       }),
-    [template.body],
+    [template],
   );
   const used = listPlaceholders(template.body);
   const insert = (name: string) => onChange({ ...template, body: `${template.body}{{${name}}}` });

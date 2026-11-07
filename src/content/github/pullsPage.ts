@@ -159,6 +159,11 @@ function fetchQuery(repo: RepoKey, query: string, force: boolean): Promise<Pulls
   return value;
 }
 
+/** Open PRs matching a search in `repo` (first page, cached like the panels). */
+export async function searchPulls(repo: RepoKey, query: string): Promise<PrListItem[]> {
+  return (await fetchQuery(repo, query, false)).results;
+}
+
 /** Load both panels: three searches in parallel, split into "Review angefragt" and "Meine". */
 export async function loadPanels(repo: RepoKey, force = false): Promise<PanelAssignment> {
   const roles: PrListRole[] = ["author", "assignee", "review-requested"];

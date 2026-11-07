@@ -3,8 +3,14 @@
  * fixing in one place; every mount has a visible, non-floating fallback.
  */
 
+// GitHub's new PR experience (opt-in, Primer React) has no stable ids or test ids on the header,
+// so it is matched by Primer's component class prefixes. The hashed suffixes change per deploy.
+const REACT_PR_HEADER = "header[class*='prc-PageLayout-Header']";
+
 const HEADER_ACTIONS_SELECTORS = [
   ".gh-header-actions",
+  // logged out, GitHub renders this row empty and hidden (`d-none`)
+  `${REACT_PR_HEADER} [class*='prc-PageHeader-Actions']:not(.d-none)`,
   "[data-testid='pr-header-actions']",
   "#partial-discussion-header .gh-header-actions",
 ];
@@ -30,6 +36,10 @@ const COMMENT_ROOT_SELECTORS = [
   ".timeline-comment",
   "[data-testid='review-thread-comment']",
   "[data-testid='comment']",
+  // new PR experience: one comment in a review thread, then a top-level comment or review
+  "[id^='discussion_r']",
+  "article[id^='issuecomment-']",
+  "article[id^='pullrequestreview-']",
 ];
 
 const COMMENT_ACTIONS_SELECTORS = [
@@ -50,8 +60,20 @@ export function findHeaderActions(): Element | undefined {
   return first(HEADER_ACTIONS_SELECTORS);
 }
 
-/** Element after which the Agent-Box is inserted (the PR header block); falls back to the timeline. */
-export function findAgentBoxAnchor(): { node: Element; position: "after" | "before" } | undefined {
+export interface Anchor {
+  node: Element;
+  /** `after`/`before`: sibling of `node`; `append`: last child of `node`. */
+  position: "after" | "before" | "append";
+}
+
+/**
+ * Where the Agent-Box goes: after the PR header block. In the new PR experience that is the end of
+ * the page header, right under the tab navigation, at content width on every tab. Falls back to
+ * the timeline.
+ */
+export function findAgentBoxAnchor(): Anchor | undefined {
+  const reactHeader = document.querySelector(`${REACT_PR_HEADER} > [class*='prc-PageLayout-HeaderContent']`);
+  if (reactHeader) return { node: reactHeader, position: "append" };
   const header = first(HEADER_BLOCK_SELECTORS);
   if (header) return { node: header, position: "after" };
   const timeline = first(TIMELINE_SELECTORS);
@@ -84,6 +106,16 @@ export function isIssueBody(root: Element): boolean {
     if (firstComment === root) return true;
   }
   return false;
+}
+
+/**
+ * Where the comment menu goes inside a comment's action container: before GitHub's own buttons
+ * (the `…` menu) in the new PR experience, otherwise first in the container.
+ */
+export function commentMenuSlot(container: Element): { parent: Element; before: Node | null } {
+  const buttons = container.querySelector("[class*='ActionsButtonsContainer']");
+  if (buttons) return { parent: buttons, before: buttons.firstChild };
+  return { parent: container, before: container.firstChild };
 }
 
 export function findCommentActionContainers(root: ParentNode = document): Element[] {

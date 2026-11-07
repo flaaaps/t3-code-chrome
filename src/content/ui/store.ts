@@ -16,8 +16,15 @@ import {
   type Session,
 } from "@shared/models";
 import { type PrKey, prKeyEquals } from "@shared/prKey";
+import { stackTopBranch } from "@shared/stack";
 import { BUILTIN_TEMPLATES } from "@shared/templates/builtin";
-import { defaultThreadTitle, missingRequirements, renderTemplate } from "@shared/templates/render";
+import {
+  defaultThreadTitle,
+  missingRequirements,
+  renderTemplate,
+  templateBody,
+  usesStackReview,
+} from "@shared/templates/render";
 
 export type LoadStatus = "idle" | "loading" | "ready" | "error";
 
@@ -66,6 +73,8 @@ export const composerComment = signal<CommentContext | undefined>(undefined);
 export const composerTarget = signal<TargetChoice | undefined>(undefined);
 export const composerSendMode = signal<SendMode>("queue");
 export const composerReviewOutput = signal<ReviewOutput>("inline");
+/** Review the PR's whole stack (templates with `{{review.stack}}`). */
+export const composerReviewStack = signal(true);
 export const composerCustomPrompt = signal<string | undefined>(undefined);
 export const composerModelKey = signal("");
 export const composerRuntimeMode = signal("");
@@ -96,13 +105,32 @@ export const renderedPrompt = computed(() => {
   const template = intent.value;
   const context = pr.value;
   if (!template || !context) return "";
-  return renderTemplate(template.body, {
+  return renderTemplate(templateBody(template), {
     pr: { ...context, ...(composerComment.value ? { comment: composerComment.value } : {}) },
     note: composerNote.value,
     reviewOutput: composerReviewOutput.value,
+    reviewStack: composerReviewStack.value,
     appendContextFooter: settings.value.appendContextFooter,
   });
 });
+
+/** Whether the selected action reviews the PR's whole stack. */
+export const reviewsStack = computed(() => {
+  const template = intent.value;
+  const context = pr.value;
+  return (
+    !!template &&
+    !!context &&
+    composerReviewStack.value &&
+    usesStackReview(template) &&
+    !!stackTopBranch(context)
+  );
+});
+
+/** The branch a new worktree starts from: the top of the stack when the whole stack is reviewed. */
+export function worktreeBranch(context: PrContext): string | undefined {
+  return (reviewsStack.value ? stackTopBranch(context) : undefined) ?? context.headBranch;
+}
 
 export const prompt = computed(() => composerCustomPrompt.value ?? renderedPrompt.value);
 
@@ -279,7 +307,7 @@ export function targetLabel(choice: TargetChoice | undefined, context: PrContext
       return choice.title;
     case "new":
       return choice.workspace === "worktree" && context?.headBranch
-        ? `Neu in ${choice.projectTitle} · Worktree ${context.headBranch}`
+        ? `Neu in ${choice.projectTitle} · Worktree ${worktreeBranch(context)}`
         : `Neu in ${choice.projectTitle} · Projekt-Checkout`;
     case "scratch":
       return "Neu ohne Projekt (Scratch)";
@@ -320,7 +348,11 @@ export function toDispatchTarget(choice: TargetChoice, context: PrContext): Disp
         projectId: choice.projectId,
         workspace:
           choice.workspace === "worktree" && context.headBranch
-            ? { type: "worktree", baseRef: context.headBranch, startFromOrigin: true }
+            ? {
+                type: "worktree",
+                baseRef: worktreeBranch(context) ?? context.headBranch,
+                startFromOrigin: true,
+              }
             : { type: "root" },
         ...(modelSelection ? { modelSelection } : {}),
         ...(runtimeMode ? { runtimeMode } : {}),
@@ -506,10 +538,11 @@ export function quickDispatch(intentId: string, options: { detailPrefix?: string
     openComposer({ intentId });
     return;
   }
-  const text = renderTemplate(template.body, {
+  const text = renderTemplate(templateBody(template), {
     pr: context,
     note: "",
     reviewOutput: composerReviewOutput.value,
+    reviewStack: composerReviewStack.value,
     appendContextFooter: settings.value.appendContextFooter,
   });
   const seconds = settings.value.dispatchDelaySeconds;
